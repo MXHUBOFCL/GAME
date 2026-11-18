@@ -4,7 +4,6 @@ local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local HttpService = game:GetService("HttpService")
 local Stats = game:GetService("Stats")
-local Lighting = game:GetService("Lighting")
 local CoreGui = game:GetService("CoreGui")
 local GuiService = game:GetService("GuiService")
 local LocalPlayer = Players.LocalPlayer
@@ -36,8 +35,6 @@ local MX = {
 	WelcomeImage = 113267102798729,
 	ConfigFolder = "MXUI",
 	Glass = false,
-	GlassBlur = true,
-	BlurMode = "Parts",
 	UserScale = 1,
 	Scale = 1,
 	NotifyEnabled = true,
@@ -51,11 +48,31 @@ local MX = {
 }
 genv.MXUI = MX
 
+-- Every connection that is NOT owned by a GUI instance (UIS, RunService, camera...) goes
+-- through Conn so MX:Destroy() can disconnect it. Disconnected entries are pruned.
 local Conns = {}
 local function Conn(sig, fn)
 	local c = sig:Connect(fn)
 	Conns[#Conns + 1] = c
+	if #Conns > 256 then
+		local w = 0
+		for i = 1, #Conns do
+			local x = Conns[i]
+			if x.Connected then
+				w += 1
+				Conns[w] = x
+			end
+		end
+		for i = #Conns, w + 1, -1 do Conns[i] = nil end
+	end
 	return c
+end
+
+-- Keep a flagged option (toggle/slider) in sync with state changed through the API,
+-- without firing its callback.
+local function SyncOpt(flag, v)
+	local o = MX.Options[flag]
+	if o and type(o.Set) == "function" and o.Value ~= v then pcall(o.Set, o, v, true) end
 end
 
 local function New(class, props, parent)
@@ -243,8 +260,14 @@ local function Bind(o, map)
 		PruneAt = math.max(600, w * 2)
 	end
 end
+-- a = BackgroundTransparency while Glass is on (1 = hidden). base = value when Glass is off.
 local function GlassOn(o, a)
-	GlassReg[#GlassReg + 1] = { o = o, a = a }
+	if #GlassReg > 400 then
+		for i = #GlassReg, 1, -1 do
+			if not GlassReg[i].o.Parent then table.remove(GlassReg, i) end
+		end
+	end
+	GlassReg[#GlassReg + 1] = { o = o, a = a, base = o.BackgroundTransparency }
 	if MX.Glass then o.BackgroundTransparency = a end
 end
 
@@ -324,7 +347,6 @@ local function TopInset()
 	return t
 end
 local function ToGui(raw) return raw end
-local function ToRaw(gui) return gui end
 local function GuiPos(i)
 	return Vector2.new(i.Position.X, i.Position.Y) + PtrD
 end
@@ -1710,186 +1732,32 @@ end
 
 MX.Utils.Copy = function(t) return Copy(t) end
 
-local Blur, BlurConn
-local BlurSlots, BlurParts, BlurOffs, BlurCFs, BlurN = {}, {}, {}, {}, 0
-local BlurSig, BlurLastCF = { 0, 0, 0, 0, 0, 0, 0, 0 }, nil
-local BLUR_DIST, BLUR_STEPS, BLUR_RADIUS = 0.001, 8, 12
-
-local function GetSlot(i)
-	local s = BlurSlots[i]
-	if not s then
-		local part = Instance.new("Part")
-		part.Name = "MX_Glass"
-		part.Color = Color3.new(0, 0, 0)
-		part.Material = Enum.Material.Glass
-		part.Size = Vector3.new(1, 1, 0)
-		part.Anchored = true
-		part.CanCollide = false
-		part.CanQuery = false
-		part.CanTouch = false
-		part.Locked = true
-		part.CastShadow = false
-		part.Transparency = 0.98
-		local mesh = Instance.new("SpecialMesh")
-		mesh.MeshType = Enum.MeshType.Brick
-		mesh.Offset = Vector3.new(0, 0, -0.000001)
-		mesh.Parent = part
-		s = { part = part, mesh = mesh }
-		BlurSlots[i] = s
-	end
-	return s
-end
-local function HideFrom(i)
-	for n = i, #BlurSlots do
-		local s = BlurSlots[n]
-		if s and s.part.Parent then s.part.Parent = nil end
-	end
-end
-
-local function StopBlur()
-	if BlurConn then BlurConn:Disconnect() BlurConn = nil end
-	for _, s in ipairs(BlurSlots) do pcall(function() s.part:Destroy() end) end
-	BlurSlots, BlurParts, BlurOffs, BlurCFs, BlurN = {}, {}, {}, {}, 0
-	BlurSig = { 0, 0, 0, 0, 0, 0, 0, 0 }
-	local fx = Blur
-	Blur = nil
-	if fx then
-		local prop = fx:IsA("BlurEffect") and "Size" or "NearIntensity"
-		pcall(function() TweenService:Create(fx, TweenInfo.new(0.2), { [prop] = 0 }):Play() end)
-		task.delay(0.25, function() pcall(function() fx:Destroy() end) end)
-	end
-end
-
-local function BlurStep()
-	local cam = workspace.CurrentCamera
-	local win = MX.Window
-	if not cam or not win then return end
-	local main = win.Main
-	if not (win.Open and main.Parent and main.Visible) then
-		if BlurSig[1] ~= -1 then
-			BlurSig[1] = -1
-			BlurN = 0
-			HideFrom(1)
-		end
-		return
-	end
-	local pos = ToRaw(main.AbsolutePosition)
-	local size = main.AbsoluteSize
-	local ins = 6
-	local x0, y0, x1, y1 = pos.X + ins, pos.Y + ins, pos.X + size.X - ins, pos.Y + size.Y - ins
-	local bw, bh = x1 - x0, y1 - y0
-	if bw <= 1 or bh <= 1 then
-		HideFrom(1)
-		return
-	end
-	local radius = math.clamp(BLUR_RADIUS * MX.Scale + ins * 0.5, 0, math.min(bw, bh) / 2)
-	local vp, fov, camCF = cam.ViewportSize, cam.FieldOfView, cam.CFrame
-	local sg = BlurSig
-	local first = BlurSlots[1]
-	local changed = not (first and first.built) or sg[1] ~= x0 or sg[2] ~= y0 or sg[3] ~= x1 or sg[4] ~= y1 or sg[5] ~= radius or sg[6] ~= vp.X or sg[7] ~= vp.Y or sg[8] ~= fov
-	if changed then
-		sg[1], sg[2], sg[3], sg[4], sg[5], sg[6], sg[7], sg[8] = x0, y0, x1, y1, radius, vp.X, vp.Y, fov
-		local rects, n = {}, 0
-		local function add(a, b, c, d)
-			n += 1
-			rects[n] = { a, b, c, d }
-		end
-		if radius < 2 then
-			add(x0, y0, x1, y1)
-		else
-			add(x0, y0 + radius, x1, y1 - radius)
-			local band = radius / BLUR_STEPS
-			for st = 1, BLUR_STEPS do
-				local top = (st - 1) * band
-				local dy = radius - (top + band / 2)
-				local cut = radius - math.sqrt(math.max(radius * radius - dy * dy, 0))
-				add(x0 + cut, y0 + top, x1 - cut, y0 + top + band + 1)
-				add(x0 + cut, y1 - top - band - 1, x1 - cut, y1 - top)
-			end
-		end
-		local function at(x, y)
-			local ray = cam:ViewportPointToRay(x, y)
-			return camCF:PointToObjectSpace(ray.Origin + ray.Direction * BLUR_DIST)
-		end
-		BlurN = 0
-		for i = 1, n do
-			local r = rects[i]
-			local s = GetSlot(i)
-			s.built = true
-			if r[3] - r[1] < 1 or r[4] - r[2] < 1 then
-				if s.part.Parent then s.part.Parent = nil end
-			else
-				local tl, tr, br = at(r[1], r[2]), at(r[3], r[2]), at(r[3], r[4])
-				s.off = CFrame.fromMatrix((tl + br) / 2, Vector3.xAxis, Vector3.yAxis)
-				s.mesh.Scale = Vector3.new((tr - tl).Magnitude, (tr - br).Magnitude, 0)
-				if s.part.Parent ~= cam then s.part.Parent = cam end
-				BlurN += 1
-				BlurParts[BlurN] = s.part
-				BlurOffs[BlurN] = s.off
-			end
-		end
-		for i = #BlurParts, BlurN + 1, -1 do
-			BlurParts[i] = nil
-			BlurOffs[i] = nil
-			BlurCFs[i] = nil
-		end
-		HideFrom(n + 1)
-	elseif camCF == BlurLastCF then
-		return
-	end
-	BlurLastCF = camCF
-	for i = 1, BlurN do BlurCFs[i] = camCF * BlurOffs[i] end
-	local ok = pcall(workspace.BulkMoveTo, workspace, BlurParts, BlurCFs, Enum.BulkMoveMode.FireCFrameChanged)
-	if not ok then
-		for i = 1, BlurN do BlurParts[i].CFrame = BlurCFs[i] end
-	end
-end
-
-local function StartBlur()
-	if Blur or BlurConn then return end
-	if MX.BlurMode == "Screen" then
-		local fx = Instance.new("BlurEffect")
-		fx.Name = "MX_Blur"
-		fx.Size = 0
-		pcall(function() fx.Parent = Lighting end)
-		Blur = fx
-		TweenService:Create(fx, TweenInfo.new(0.25), { Size = MX.BlurSize or 16 }):Play()
-		return
-	end
-	local dof = Instance.new("DepthOfFieldEffect")
-	dof.Name = "MX_Blur"
-	dof.FarIntensity = 0
-	dof.InFocusRadius = 0.1
-	dof.FocusDistance = 0.05
-	dof.NearIntensity = 0
-	pcall(function() dof.Parent = Lighting end)
-	Blur = dof
-	TweenService:Create(dof, TweenInfo.new(0.25), { NearIntensity = 1 }):Play()
-	BlurConn = RunService.RenderStepped:Connect(BlurStep)
-end
-
-function MX:_UpdateBlur()
-	local want = MX.Glass and MX.GlassBlur and MX.Window and MX.Window.Open
-	if want then StartBlur() else StopBlur() end
-end
+-- Glass: one translucent pane. Only the window base and floating cards are tinted; inner
+-- layers (header, sidebar, content) and their corner filler pieces turn fully transparent,
+-- so overlapping translucent frames no longer stack into darker strips/boxes.
+-- (The old "Screen Blur" / DepthOfField part-blur was removed: it blurred the game world,
+-- was expensive, and only rendered on high graphics settings.)
+local GlassHooks = {}
 function MX:SetGlass(v)
 	MX.Glass = v and true or false
 	for i = #GlassReg, 1, -1 do
 		local e = GlassReg[i]
-		if e.o.Parent then Tween(e.o, { BackgroundTransparency = MX.Glass and e.a or 0 }, 0.25) else table.remove(GlassReg, i) end
+		if e.o.Parent then
+			Tween(e.o, { BackgroundTransparency = MX.Glass and e.a or e.base }, 0.25)
+		else
+			table.remove(GlassReg, i)
+		end
 	end
-	if MX.Options.glass and MX.Options.glass.Value ~= MX.Glass then MX.Options.glass:Set(MX.Glass, true) end
-	MX:_UpdateBlur()
+	for i = #GlassHooks, 1, -1 do
+		local ok, alive = pcall(GlassHooks[i], MX.Glass)
+		if ok and alive == false then table.remove(GlassHooks, i) end
+	end
+	SyncOpt("glass", MX.Glass)
 end
 function MX:GetGlass() return MX.Glass end
-function MX:SetGlassBlur(v)
-	MX.GlassBlur = v and true or false
-	MX:_UpdateBlur()
-end
-function MX:SetBlurSize(v)
-	MX.BlurSize = math.clamp(tonumber(v) or 16, 0, 56)
-	if Blur and Blur:IsA("BlurEffect") then Blur.Size = MX.BlurSize end
-end
+-- Deprecated no-ops kept so scripts written for older versions don't error.
+function MX:SetGlassBlur() end
+function MX:SetBlurSize() end
 
 MX.ThemeListeners = {}
 local function Watch(inst, fn)
@@ -3358,7 +3226,7 @@ local function NewSection(parent, base, o)
 	local title = tostring(o.Title or o.Name or "")
 	local headless = o.NoHeader or title == ""
 	local card = Box(parent, { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY, LayoutOrder = base.order or 0, ClipsDescendants = true }, "Card", 8, "Border")
-	GlassOn(card, 0.35)
+	GlassOn(card, 0.3)
 	List(card, 0)
 	local sec = setmetatable({ Frame = card, Win = base.Win, Owner = base.Owner, NoIndex = base.NoIndex, SecTitle = title, Up = base.Up, Collapsed = false, ToggleValue = o.Default and true or false }, SectionMT)
 	sec.SecObj = sec
@@ -3755,7 +3623,6 @@ function Window:Toggle(state)
 		end)
 	end
 	self:_UpdateMobileBtn()
-	MX:_UpdateBlur()
 end
 function Window:Show() self:Toggle(true) end
 function Window:Hide() self:Toggle(false) end
@@ -3888,19 +3755,27 @@ function MX:CreateWindow(o)
 	win.HH = Touch and 42 or 38
 	if o.Theme and MX.Themes[o.Theme] then MX:SetTheme(o.Theme, true) end
 	if o.Glass then MX:SetGlass(true) end
-	if o.GlassBlur then MX:SetGlassBlur(true) end
 	if o.ToggleKeys then MX:_SetMenuKeys(o.ToggleKeys) elseif o.ToggleKey then MX:_SetMenuKeys({ Enum.KeyCode.Insert, o.ToggleKey }) end
 
 	local main = Box(WinLayer, { Name = "Main", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, TopInset() / 2), Size = UDim2.fromOffset(win.BaseW, win.BaseH), ClipsDescendants = true }, "Window", 10, "Border")
-	GlassOn(main, 0.15)
+	GlassOn(main, 0.2)
 	win.Main = main
+	do
+		-- Subtle top-to-bottom sheen, only while Glass is on.
+		local sheen = New("UIGradient", { Rotation = 90, Enabled = MX.Glass, Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 0.35) }) }, main)
+		table.insert(GlassHooks, function(on)
+			if not sheen.Parent then return false end
+			sheen.Enabled = on
+			return true
+		end)
+	end
 	win.ScaleObj = Scaled(main)
 	local HH = win.HH
 
 	local header = Box(main, { Size = UDim2.new(1, 0, 0, HH), ZIndex = 3 }, "Panel", 10)
-	GlassOn(header, 0.2)
+	GlassOn(header, 1)
 	local hfill = Box(header, { Size = UDim2.new(1, 0, 0, 12), Position = UDim2.new(0, 0, 1, -12) }, "Panel")
-	GlassOn(hfill, 0.2)
+	GlassOn(hfill, 1)
 	local hline = Box(header, { Size = UDim2.new(1, 0, 0, 1), Position = UDim2.new(0, 0, 1, -1) }, "Border")
 	hline.BackgroundTransparency = 0.5
 	local hl = New("Frame", { BackgroundTransparency = 1, Size = UDim2.new(0, 0, 1, 0), AutomaticSize = AX, Position = UDim2.new(0, 8, 0, 0), ZIndex = 4 }, header)
@@ -3993,7 +3868,6 @@ function MX:CreateWindow(o)
 			gearRefs = {}
 			gearMenu, gearFrame = MakeMenu("Quick Settings", 240)
 			gearRefs.glass = gearMenu:AddToggle({ Title = "Glass", Style = "Switch", Callback = function(v) MX:SetGlass(v) end })
-			gearRefs.blur = gearMenu:AddToggle({ Title = "Screen Blur", Description = "Blurs the game while Glass is on", Style = "Switch", Callback = function(v) MX:SetGlassBlur(v) end })
 			gearRefs.wm = gearMenu:AddToggle({ Title = "Watermark", Style = "Switch", Callback = function(v) if MX.Watermark then MX.Watermark:SetVisible(v) end end })
 			gearRefs.kl = gearMenu:AddToggle({ Title = "Keybind List", Style = "Switch", Callback = function(v) if MX.KeyList then MX.KeyList:SetVisible(v) end end })
 			gearRefs.stars = gearMenu:AddToggle({ Title = "Shooting Stars", Style = "Switch", Callback = function(v) win:SetStars(v) end })
@@ -4005,7 +3879,6 @@ function MX:CreateWindow(o)
 			end
 		end
 		gearRefs.glass:Set(MX.Glass, true)
-		gearRefs.blur:Set(MX.GlassBlur, true)
 		gearRefs.wm:Set(MX.Watermark and MX.Watermark.Visible or false, true)
 		gearRefs.kl:Set(MX.KeyList and MX.KeyList.Visible or false, true)
 		gearRefs.stars:Set(win.Stars and true or false, true)
@@ -4038,8 +3911,8 @@ function MX:CreateWindow(o)
 	})
 
 	local sidebar = Box(main, { Position = UDim2.new(0, 0, 0, HH), Size = UDim2.new(0, win.TabWidth, 1, -HH), ClipsDescendants = true }, "Side")
-	GlassOn(sidebar, 0.3)
-	RoundBox(sidebar, "Side", 0.3, "left")
+	GlassOn(sidebar, 1)
+	RoundBox(sidebar, "Side", 1, "left")
 	Box(sidebar, { Size = UDim2.new(0, 1, 1, 0), AnchorPoint = Vector2.new(1, 0), Position = UDim2.fromScale(1, 0), BackgroundTransparency = 0.5, ZIndex = 2 }, "Border")
 	win.Sidebar = sidebar
 	local profileH = o.Profile ~= false and 52 or 0
@@ -4050,7 +3923,9 @@ function MX:CreateWindow(o)
 	table.insert(win.Pages, sl)
 	if profileH > 0 then
 		local pf = Box(sidebar, { Size = UDim2.new(1, 0, 0, profileH), AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 0, 1, 0) }, "Panel")
-		GlassOn(pf, 0.4)
+		GlassOn(pf, 1)
+		-- Round only the bottom-left corner so it doesn't poke out of the window's rounded corner.
+		RoundBox(pf, "Panel", 1, "left")
 		Box(pf, { Size = UDim2.new(1, -16, 0, 1), Position = UDim2.new(0, 8, 0, 0), BackgroundTransparency = 0.5 }, "Border")
 		local av = New("ImageLabel", { Size = UDim2.fromOffset(32, 32), Position = UDim2.new(0, 12, 0.5, -16), BackgroundTransparency = 0, BorderSizePixel = 0, Image = "" }, pf)
 		Bind(av, { BackgroundColor3 = "Element" })
@@ -4067,8 +3942,8 @@ function MX:CreateWindow(o)
 	end
 
 	local content = Box(main, { Position = UDim2.new(0, win.TabWidth, 0, HH), Size = UDim2.new(1, -win.TabWidth, 1, -HH), ClipsDescendants = true }, "Panel")
-	GlassOn(content, 0.25)
-	RoundBox(content, "Panel", 0.25, "right")
+	GlassOn(content, 1)
+	RoundBox(content, "Panel", 1, "right")
 	win.Content = content
 	win.PageHost = New("Frame", { BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ClipsDescendants = true }, content)
 
@@ -4190,7 +4065,6 @@ function MX:Destroy()
 	if MX.Dead then return end
 	MX.Dead = true
 	for _, c in ipairs(Conns) do pcall(function() c:Disconnect() end) end
-	if Blur then Blur:Destroy() Blur = nil end
 	if Gui then Gui:Destroy() end
 	if genv.MXUI == MX then genv.MXUI = nil end
 end
@@ -4438,13 +4312,15 @@ function MX:AddWindow(o)
 	local minW, minH = w, h
 	local maxW, maxH = o.MaxWidth or math.max(w * 2.2, 560), o.MaxHeight or math.max(h * 2.6, 460)
 	local f = Box(FloatLayer, { Size = UDim2.fromOffset(w, h), ClipsDescendants = true, ZIndex = WinN }, "Window", 8, "Border")
+	GlassOn(f, 0.2)
 	Scaled(f)
 	f.AnchorPoint = Vector2.new(0.5, 0.5)
 	if typeof(o.Position) == "UDim2" then f.Position = o.Position
 	elseif typeof(o.Position) == "Vector2" then f.Position = UDim2.fromOffset(o.Position.X, o.Position.Y)
 	else f.Position = UDim2.new(0.5, 24 * (WinN % 8), 0.5, 24 * (WinN % 8)) end
 	local head = Box(f, { Size = UDim2.new(1, 0, 0, 30), ZIndex = 3 }, "Panel", 8)
-	Box(head, { Size = UDim2.new(1, 0, 0, 8), Position = UDim2.new(0, 0, 1, -8) }, "Panel")
+	GlassOn(head, 1)
+	GlassOn(Box(head, { Size = UDim2.new(1, 0, 0, 8), Position = UDim2.new(0, 0, 1, -8) }, "Panel"), 1)
 	local hl = New("Frame", { BackgroundTransparency = 1, Position = UDim2.new(0, 8, 0, 0), Size = UDim2.new(1, -40, 1, 0) }, head)
 	List(hl, 6, Enum.FillDirection.Horizontal, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
 	if o.Icon then
@@ -4653,7 +4529,6 @@ function Window:AddSettingsTab(o)
 	local look = tab:AddSection({ Title = "Appearance", Icon = "palette" })
 	look:AddDropdown({ Title = "Theme", Flag = "theme", Values = MX.ThemeOrder, Default = MX.ThemeName, Callback = function(n) MX:SetTheme(n) end })
 	look:AddToggle({ Title = "Glass", Description = "See-through window on top of any theme", Flag = "glass", Style = "Switch", Default = MX.Glass, Callback = function(v) MX:SetGlass(v) end })
-	look:AddToggle({ Title = "Screen Blur", Description = "Blurs the game behind the menu while Glass is on", Flag = "glass_blur", Style = "Switch", Default = MX.GlassBlur, Callback = function(v) MX:SetGlassBlur(v) end })
 	look:AddSlider({ Title = "UI Scale", Description = "Make everything bigger or smaller", Flag = "ui_scale", Min = 0.6, Max = 1.4, Increment = 0.05, Default = MX.UserScale, Callback = function(v) self:SetScale(v) end })
 	look:AddToggle({ Title = "Theme Fade", Flag = "themefade", Style = "Switch", Default = MX.ThemeSweep, Callback = function(v) MX.ThemeSweep = v end })
 	look:AddToggle({ Title = "Shooting Stars", Flag = "stars", Style = "Switch", Default = self.Stars, Callback = function(v) self:SetStars(v) end })
