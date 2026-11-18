@@ -3624,6 +3624,7 @@ function Window:Toggle(state)
 		end)
 	end
 	self:_UpdateMobileBtn()
+	self:_FxRefresh()
 end
 function Window:Show() self:Toggle(true) end
 function Window:Hide() self:Toggle(false) end
@@ -3660,28 +3661,242 @@ function Window:Dialog(o)
 end
 function MX:Dialog(o) if MX.Window then MX.Window:Dialog(o) end end
 
-function Window:_Star()
-	local host = self.PageHost
-	local sz = host.AbsoluteSize / MX.Scale
-	local s = New("Frame", { BackgroundColor3 = Theme.Accent, BorderSizePixel = 0, Size = UDim2.fromOffset(60, 2), Rotation = 25, ZIndex = 0, Position = UDim2.fromOffset(math.random(0, math.max(1, math.floor(sz.X))), -10) }, host)
-	New("UIGradient", { Transparency = NumberSequence.new(1, 0) }, s)
-	local p = s.Position
-	Tween(s, { Position = UDim2.fromOffset(p.X.Offset + 220, p.Y.Offset + 110) }, 1.2, Enum.EasingStyle.Linear)
-	task.delay(1.25, function() s:Destroy() end)
-end
-function Window:SetStars(v)
-	self.Stars = v and true or false
-	if self.Stars and not self._starLoop then
-		self._starLoop = task.spawn(function()
-			while self.Stars and not MX.Dead and self.Main.Parent do
-				if self.Open and self.Selected then self:_Star() end
-				task.wait(math.random(15, 45) / 10)
-			end
-			self._starLoop = nil
-		end)
+-- Effects -------------------------------------------------------------------------------
+-- Shooting Stars, Snow, Rain and Fire. All effects of a window share ONE Heartbeat
+-- connection that only exists while at least one effect is on AND the window is open.
+-- Particles are pooled Frames, capped per effect (Max * Intensity), recycled when they
+-- leave the area and destroyed when the effect is turned off or the UI is unloaded.
+MX.EffectOrder = { "Stars", "Snow", "Rain", "Fire" }
+MX.EffectIntensity = 0.6
+local EffectDefs = {}
+MX.EffectDefs = EffectDefs
+local function Rnd(a, b) return a + math.random() * (b - a) end
+local RAIN_ANGLE = math.rad(12)
+local STAR_ANGLE = math.rad(26)
+
+EffectDefs.Stars = {
+	Flag = "stars", Title = "Shooting Stars", Max = 3, Rate = 0.45,
+	Make = function(layer)
+		local f = New("Frame", { BorderSizePixel = 0, Size = UDim2.fromOffset(70, 2), Rotation = math.deg(STAR_ANGLE), AnchorPoint = Vector2.new(1, 0.5), Visible = false }, layer)
+		New("UIGradient", { Transparency = NumberSequence.new(1, 0) }, f)
+		return f
+	end,
+	Color = function(f) f.BackgroundColor3 = Theme.Accent end,
+	Spawn = function(p, w, h)
+		p.x, p.y = Rnd(0, w * 0.75), Rnd(-10, h * 0.3)
+		local sp = Rnd(200, 300)
+		p.vx, p.vy = sp * math.cos(STAR_ANGLE), sp * math.sin(STAR_ANGLE)
+		p.life = Rnd(0.9, 1.4)
+	end,
+	Step = function(p, dt)
+		p.x += p.vx * dt
+		p.y += p.vy * dt
+		local t = p.age / p.life
+		p.f.BackgroundTransparency = t < 0.15 and (1 - t / 0.15) or (t > 0.7 and (t - 0.7) / 0.3 or 0)
+	end,
+}
+
+EffectDefs.Snow = {
+	Flag = "fx_snow", Title = "Snow", Max = 60, Rate = 16,
+	Make = function(layer)
+		local f = New("Frame", { BorderSizePixel = 0, AnchorPoint = Vector2.new(0.5, 0.5), Visible = false }, layer)
+		New("UICorner", { CornerRadius = UDim.new(1, 0) }, f)
+		return f
+	end,
+	-- Theme Text colour: white flakes on dark themes, dark flakes on light themes.
+	Color = function(f) f.BackgroundColor3 = Theme.Text end,
+	Spawn = function(p, w)
+		local s = math.random(2, 5)
+		p.f.Size = UDim2.fromOffset(s, s)
+		p.f.BackgroundTransparency = Rnd(0.15, 0.55)
+		p.x0, p.y = Rnd(0, w), -6
+		p.x = p.x0
+		p.vy = Rnd(22, 55) * (0.7 + s * 0.1)
+		p.amp, p.fq, p.ph, p.drift = Rnd(6, 18), Rnd(0.6, 1.4), Rnd(0, 6.28), Rnd(-6, 6)
+		p.life = nil
+	end,
+	Step = function(p, dt, _, h)
+		p.y += p.vy * dt
+		p.x = p.x0 + math.sin(p.age * p.fq + p.ph) * p.amp + p.drift * p.age
+		return p.y < h + 8
+	end,
+}
+
+EffectDefs.Rain = {
+	Flag = "fx_rain", Title = "Rain", Max = 70, Rate = 60,
+	Make = function(layer)
+		return New("Frame", { BorderSizePixel = 0, AnchorPoint = Vector2.new(0.5, 0.5), Rotation = math.deg(RAIN_ANGLE), Visible = false }, layer)
+	end,
+	Color = function(f) f.BackgroundColor3 = Theme.Sub end,
+	Spawn = function(p, w, h)
+		local len = math.random(10, 18)
+		p.f.Size = UDim2.fromOffset(1, len)
+		p.f.BackgroundTransparency = Rnd(0.35, 0.65)
+		p.vy = Rnd(380, 560)
+		p.vx = -p.vy * math.tan(RAIN_ANGLE)
+		p.x, p.y = Rnd(0, w + h * math.tan(RAIN_ANGLE)), -len
+		p.life = nil
+	end,
+	Step = function(p, dt, _, h)
+		p.x += p.vx * dt
+		p.y += p.vy * dt
+		return p.y < h + 20
+	end,
+}
+
+local FireA, FireB, FireC = C3(255, 214, 110), C3(255, 120, 40), C3(190, 36, 28)
+EffectDefs.Fire = {
+	Flag = "fx_fire", Title = "Fire", Max = 50, Rate = 32,
+	Make = function(layer)
+		local f = New("Frame", { BorderSizePixel = 0, AnchorPoint = Vector2.new(0.5, 0.5), Visible = false }, layer)
+		New("UICorner", { CornerRadius = UDim.new(1, 0) }, f)
+		return f
+	end,
+	Color = function() end, -- coloured per frame from its age (mixed with the theme accent)
+	Extra = function(layer)
+		local glow = New("Frame", { BorderSizePixel = 0, AnchorPoint = Vector2.new(0, 1), Position = UDim2.fromScale(0, 1), Size = UDim2.new(1, 0, 0, 70) }, layer)
+		New("UIGradient", { Rotation = 90, Transparency = NumberSequence.new(1, 0.55) }, glow)
+		return glow
+	end,
+	ColorExtra = function(glow) glow.BackgroundColor3 = FireB:Lerp(Theme.Accent, 0.3) end,
+	Spawn = function(p, w, h)
+		p.s = Rnd(3, 7)
+		p.x0, p.y = Rnd(0, w), h + 4
+		p.x = p.x0
+		p.vy = -Rnd(45, 110)
+		p.amp, p.fq, p.ph = Rnd(3, 10), Rnd(1.5, 3), Rnd(0, 6.28)
+		p.life = Rnd(1.2, 2.4)
+	end,
+	Step = function(p, dt)
+		p.y += p.vy * dt
+		p.x = p.x0 + math.sin(p.age * p.fq + p.ph) * p.amp
+		local t = math.clamp(p.age / p.life, 0, 1)
+		local col = t < 0.5 and FireA:Lerp(FireB, t * 2) or FireB:Lerp(FireC, (t - 0.5) * 2)
+		local s = math.max(1, p.s * (1 - 0.55 * t))
+		p.f.BackgroundColor3 = col:Lerp(Theme.Accent, 0.2)
+		p.f.BackgroundTransparency = 0.1 + 0.9 * t
+		p.f.Size = UDim2.fromOffset(s, s)
+	end,
+}
+
+function Window:_FxRefresh()
+	local run = self.Fx ~= nil and next(self.Fx) ~= nil and self.Open and not MX.Dead and self.FxLayer ~= nil and self.FxLayer.Parent ~= nil
+	if self.FxLayer then self.FxLayer.Visible = run and true or false end
+	if run and not self._fxConn then
+		self._fxConn = Conn(RunService.Heartbeat, function(dt) self:_FxStep(dt) end)
+	elseif not run and self._fxConn then
+		self._fxConn:Disconnect()
+		self._fxConn = nil
 	end
 end
-function Window:GetStars() return self.Stars end
+
+function Window:_FxStep(dt)
+	if MX.Dead then return end
+	local layer = self.FxLayer
+	if not layer or not layer.Parent then return end
+	dt = math.min(dt, 0.1)
+	local sz = layer.AbsoluteSize / math.max(MX.Scale, 0.01)
+	local w, h = sz.X, sz.Y
+	if w < 10 or h < 10 then return end
+	local k = MX.EffectIntensity
+	for _, st in pairs(self.Fx) do
+		local def, pool = st.def, st.pool
+		local cap = math.max(1, math.floor(def.Max * k + 0.5))
+		st.acc += dt * def.Rate * k
+		while st.acc >= 1 do
+			st.acc -= 1
+			local p
+			for _, q in ipairs(pool) do
+				if not q.alive then p = q break end
+			end
+			if not p and #pool < cap then
+				p = { f = def.Make(layer) }
+				def.Color(p.f)
+				pool[#pool + 1] = p
+			end
+			if not p then
+				st.acc = 0
+				break
+			end
+			p.alive, p.age = true, 0
+			def.Spawn(p, w, h)
+			p.f.Position = UDim2.fromOffset(p.x, p.y)
+			p.f.Visible = true
+		end
+		for i = #pool, 1, -1 do
+			local p = pool[i]
+			if p.alive then
+				p.age += dt
+				if def.Step(p, dt, w, h) == false or (p.life and p.age >= p.life) then
+					p.alive = false
+					p.f.Visible = false
+				else
+					p.f.Position = UDim2.fromOffset(p.x, p.y)
+				end
+			end
+			if not p.alive and i > cap then
+				p.f:Destroy()
+				table.remove(pool, i)
+			end
+		end
+	end
+end
+
+function Window:_FxClear(name)
+	local st = self.Fx[name]
+	if not st then return end
+	for _, p in ipairs(st.pool) do p.f:Destroy() end
+	if st.extra then st.extra:Destroy() end
+	self.Fx[name] = nil
+end
+
+function Window:SetEffect(name, on)
+	local def = EffectDefs[name]
+	if not def or not self.FxLayer then return end
+	on = on and not MX.Dead and true or false
+	if on and not self.Fx[name] then
+		local st = { def = def, pool = {}, acc = 0.99 }
+		if def.Extra then
+			st.extra = def.Extra(self.FxLayer)
+			if def.ColorExtra then def.ColorExtra(st.extra) end
+		end
+		self.Fx[name] = st
+	elseif not on then
+		self:_FxClear(name)
+	end
+	if name == "Stars" then self.Stars = on end
+	SyncOpt(def.Flag, on)
+	self:_FxRefresh()
+end
+function Window:GetEffect(name) return self.Fx ~= nil and self.Fx[name] ~= nil end
+function Window:ToggleEffect(name) self:SetEffect(name, not self:GetEffect(name)) end
+function Window:SetStars(v) self:SetEffect("Stars", v) end
+function Window:GetStars() return self:GetEffect("Stars") end
+
+function MX:SetEffectIntensity(v)
+	v = tonumber(v) or 60
+	if v > 1 then v = v / 100 end
+	MX.EffectIntensity = math.clamp(v, 0.25, 1)
+	SyncOpt("fx_intensity", math.floor(MX.EffectIntensity * 100 + 0.5))
+end
+function MX:SetEffect(name, on) if MX.Window then MX.Window:SetEffect(name, on) end end
+
+function Window:_FxInit(content)
+	self.Fx = {}
+	-- Sits under the pages (PageHost ZIndex 2) and above the content background/fillers.
+	local layer = New("Frame", { Name = "Effects", BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.fromScale(1, 1), ClipsDescendants = true, ZIndex = 1, Visible = false }, content)
+	self.FxLayer = layer
+	self._fxStop = function()
+		if self._fxConn then self._fxConn:Disconnect() self._fxConn = nil end
+		for name in pairs(self.Fx) do self:_FxClear(name) end
+	end
+	Watch(layer, function()
+		for _, st in pairs(self.Fx) do
+			for _, p in ipairs(st.pool) do st.def.Color(p.f) end
+			if st.extra and st.def.ColorExtra then st.def.ColorExtra(st.extra) end
+		end
+	end)
+end
 
 function Window:_Goto(e)
 	local c = e.cont
@@ -3928,7 +4143,8 @@ function MX:CreateWindow(o)
 	GlassOn(content, 1)
 	RoundBox(content, "Panel", 1, "right")
 	win.Content = content
-	win.PageHost = New("Frame", { BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ClipsDescendants = true }, content)
+	win:_FxInit(content)
+	win.PageHost = New("Frame", { BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ClipsDescendants = true, ZIndex = 2 }, content)
 
 	if o.Resizable ~= false then
 		local grip = New("TextButton", { Text = "◢", AutoButtonColor = false, BackgroundTransparency = 1, Size = UDim2.fromOffset(Touch and 28 or 20, Touch and 28 or 20), AnchorPoint = Vector2.new(1, 1), Position = UDim2.fromScale(1, 1), Font = FONT.Bold, TextSize = 11, ZIndex = 5 }, main)
@@ -3960,7 +4176,11 @@ function MX:CreateWindow(o)
 			win:_Fit()
 		end
 	end)
+	if o.EffectIntensity then MX:SetEffectIntensity(o.EffectIntensity) end
 	win:SetStars(o.Stars == nil and not Touch or o.Stars == true)
+	if type(o.Effects) == "table" then
+		for name, on in pairs(o.Effects) do win:SetEffect(name, on) end
+	end
 
 	local mbOpt = o.MobileButton
 	if mbOpt == nil then mbOpt = "Auto" end
@@ -4667,7 +4887,12 @@ function Window:AddSettingsTab(o)
 	look:AddToggle({ Title = "Theme Fade", Description = "Animate colours when switching themes", Flag = "themefade", Style = "Switch", Default = MX.ThemeSweep, Callback = function(v) MX.ThemeSweep = v end })
 	look:AddLabel("Glass, watermark, UI scale, keybind list, configs and unload are in Quick Settings (gear icon in the header).")
 	local fx = tab:AddSection({ Title = "Effects", Icon = "wand" })
-	fx:AddToggle({ Title = "Shooting Stars", Flag = "stars", Style = "Switch", Default = win.Stars, Callback = function(v) win:SetStars(v) end })
+	local fxDesc = { Stars = "Occasional streaks in the accent colour", Snow = "Falling snowflakes", Rain = "Light rain behind the menu", Fire = "Rising embers and a warm glow" }
+	for _, name in ipairs(MX.EffectOrder) do
+		local def = EffectDefs[name]
+		fx:AddToggle({ Title = def.Title, Description = fxDesc[name], Flag = def.Flag, Style = "Switch", Default = win:GetEffect(name), Callback = function(v) win:SetEffect(name, v) end })
+	end
+	fx:AddSlider({ Title = "Intensity", Description = "Particle amount for every effect", Flag = "fx_intensity", Min = 25, Max = 100, Increment = 5, Default = math.floor(MX.EffectIntensity * 100 + 0.5), Suffix = "%", Callback = function(v) MX:SetEffectIntensity(v) end })
 	self.EffectsSection = fx
 	self._settingsTab = tab
 	return tab
