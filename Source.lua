@@ -114,20 +114,37 @@ local Theme = {}
 local Reg, GlassReg = {}, {}
 MX.Theme = Theme
 
+local ThemeKeys = { "Window", "Side", "Panel", "Card", "Element", "Hover", "Accent", "Text", "Sub", "Off" }
+local ThemeFallback = {
+	Window = C3(14, 14, 18), Side = C3(9, 9, 12), Panel = C3(18, 18, 23), Card = C3(23, 23, 30), Element = C3(32, 32, 41),
+	Hover = C3(44, 44, 57), Accent = C3(236, 60, 84), Text = C3(240, 240, 246), Sub = C3(150, 152, 170), Off = C3(52, 52, 64),
+}
+
 function MX:AddThemes(t)
+	if type(t) ~= "table" then return end
 	local names = {}
-	for name in pairs(t) do names[#names + 1] = name end
+	for name, d in pairs(t) do
+		if type(name) == "string" and type(d) == "table" then names[#names + 1] = name end
+	end
 	table.sort(names)
 	for _, name in ipairs(names) do
-		local d = t[name]
-		if not d.Border then
+		local d = table.clone(t[name])
+		-- Every theme must define every colour token, otherwise SetTheme would write nil into
+		-- bound properties (runtime error). Missing tokens fall back to the default palette.
+		for _, k in ipairs(ThemeKeys) do
+			if typeof(d[k]) ~= "Color3" then
+				if d[k] ~= nil then warn("[MX] Theme '" .. name .. "': " .. k .. " is not a Color3, using default") end
+				d[k] = ThemeFallback[k]
+			end
+		end
+		if typeof(d.Border) ~= "Color3" then
 			d.Border = d.Card:Lerp(d.Text, Lum(d.Card) > 0.5 and 0.3 or 0.38)
 		end
-		d.OnAccent = d.OnAccent or (Lum(d.Accent) > 0.62 and C3(20, 20, 24) or C3(255, 255, 255))
-		d.Success = d.Success or C3(86, 214, 140)
-		d.Warning = d.Warning or C3(245, 180, 66)
-		d.Danger = d.Danger or C3(236, 80, 90)
-		if not MX.Themes[name] then table.insert(MX.ThemeOrder, name) end
+		if typeof(d.OnAccent) ~= "Color3" then d.OnAccent = Lum(d.Accent) > 0.62 and C3(20, 20, 24) or C3(255, 255, 255) end
+		if typeof(d.Success) ~= "Color3" then d.Success = C3(86, 214, 140) end
+		if typeof(d.Warning) ~= "Color3" then d.Warning = C3(245, 180, 66) end
+		if typeof(d.Danger) ~= "Color3" then d.Danger = C3(236, 80, 90) end
+		if not MX.Themes[name] and not table.find(MX.ThemeOrder, name) then table.insert(MX.ThemeOrder, name) end
 		MX.Themes[name] = d
 	end
 end
@@ -140,7 +157,7 @@ MX:AddThemes({
 	["Sunset"] = { Window = C3(22, 13, 14), Side = C3(15, 8, 9), Panel = C3(27, 16, 17), Card = C3(34, 21, 22), Element = C3(47, 30, 31), Hover = C3(63, 41, 42), Border = C3(92, 62, 62), Accent = C3(255, 128, 64), Text = C3(252, 242, 238), Sub = C3(186, 150, 142), Off = C3(70, 48, 48) },
 
 	Rose = { Window = C3(28, 18, 22), Side = C3(22, 14, 18), Panel = C3(32, 21, 26), Card = C3(38, 25, 31), Element = C3(50, 33, 41), Hover = C3(64, 44, 54), Accent = C3(255, 120, 170), Text = C3(252, 238, 244), Sub = C3(176, 140, 154), Off = C3(82, 58, 70) },
-	Crimson = { Window = C3(19, 19, 19), Side = C3(14, 14, 14), Panel = C3(17, 17, 17), Card = C3(13, 13, 13), Element = C3(27, 27, 27), Hover = C3(38, 38, 38), Accent = C3(255, 24, 24), Text = C3(240, 240, 240), Sub = C3(112, 112, 112), Off = C3(34, 34, 34) },
+	Crimson = { Window = C3(15, 15, 15), Side = C3(10, 10, 10), Panel = C3(18, 18, 18), Card = C3(23, 23, 23), Element = C3(31, 31, 31), Hover = C3(43, 43, 43), Accent = C3(235, 36, 44), Text = C3(240, 240, 240), Sub = C3(132, 132, 132), Off = C3(46, 46, 46) },
 	Onyx = { Window = C3(10, 10, 10), Side = C3(5, 5, 5), Panel = C3(8, 8, 8), Card = C3(14, 14, 14), Element = C3(22, 22, 22), Hover = C3(34, 34, 34), Accent = C3(255, 255, 255), Text = C3(245, 245, 245), Sub = C3(140, 140, 140), Off = C3(42, 42, 42), OnAccent = C3(10, 10, 10) },
 	Dark = { Window = C3(24, 24, 26), Side = C3(19, 19, 21), Panel = C3(28, 28, 31), Card = C3(33, 33, 37), Element = C3(42, 42, 47), Hover = C3(54, 54, 60), Accent = C3(96, 205, 255), Text = C3(240, 240, 244), Sub = C3(140, 142, 152), Off = C3(70, 70, 80) },
 	Darker = { Window = C3(12, 12, 14), Side = C3(8, 8, 10), Panel = C3(15, 15, 18), Card = C3(20, 20, 24), Element = C3(28, 28, 33), Hover = C3(38, 38, 44), Accent = C3(96, 205, 255), Text = C3(240, 240, 244), Sub = C3(130, 132, 144), Off = C3(48, 48, 58) },
@@ -154,10 +171,13 @@ MX:AddThemes({
 	["Mono"] = { Window = C3(12, 12, 12), Side = C3(7, 7, 7), Panel = C3(16, 16, 16), Card = C3(22, 22, 22), Element = C3(31, 31, 31), Hover = C3(43, 43, 43), Border = C3(64, 64, 64), Accent = C3(235, 235, 235), Text = C3(245, 245, 245), Sub = C3(140, 140, 140), Off = C3(50, 50, 50) },
 })
 do
-	local order = { "Obsidian", "Frost", "Violet", "Ocean", "Sunset", "Mono", "Rose", "Crimson", "Onyx", "Dark", "Darker", "Light", "Aqua", "Lagoon", "Amethyst", "Toxic", "Noir" }
-	table.insert(order, "Emerald")
-	MX.ThemeOrder = order
-	for k, v in pairs(MX.Themes) do Theme[k] = nil end
+	-- Keep the built-in order stable; any theme not listed here is appended at the end.
+	local order = { "Obsidian", "Frost", "Violet", "Ocean", "Sunset", "Mono", "Rose", "Crimson", "Onyx", "Dark", "Darker", "Light", "Aqua", "Lagoon", "Amethyst", "Toxic", "Noir", "Emerald" }
+	for _, n in ipairs(MX.ThemeOrder) do
+		if not table.find(order, n) then table.insert(order, n) end
+	end
+	table.clear(MX.ThemeOrder)
+	for _, n in ipairs(order) do table.insert(MX.ThemeOrder, n) end
 	for k, v in pairs(MX.Themes["Obsidian"]) do Theme[k] = v end
 end
 
@@ -1880,12 +1900,22 @@ local function Watch(inst, fn)
 	end)
 end
 
+-- Reg can hold non-GuiObjects (UIStroke, UIGradient, ...). Only GuiObjects have
+-- AbsolutePosition, so resolve the nearest GuiObject before reading layout props.
+local function GuiAnchor(o)
+	if o:IsA("GuiObject") then return o end
+	return o:FindFirstAncestorWhichIsA("GuiObject")
+end
+
+local ThemeGen = 0
 function MX:SetTheme(name, instant)
 	local def = MX.Themes[name]
-	if not def then return end
+	if not def or MX.Dead then return end
 	MX.ThemeName = name
+	ThemeGen += 1
+	local gen = ThemeGen
 	local win = MX.Window
-	local sweep = MX.ThemeSweep and not instant and win and win.Open
+	local sweep = MX.ThemeSweep and not instant and win and win.Open and win.Main and win.Main.Parent ~= nil
 	local wx, ww = 0, 1
 	if sweep then wx, ww = win.Main.AbsolutePosition.X, math.max(1, win.Main.AbsoluteSize.X) end
 	local buckets = {}
@@ -1895,16 +1925,32 @@ function MX:SetTheme(name, instant)
 			table.remove(Reg, i)
 		else
 			local b = 0
-			if sweep then b = math.clamp(math.floor((e.o.AbsolutePosition.X - wx) / ww * 7 + 0.5), 0, 7) end
+			if sweep then
+				local g = GuiAnchor(e.o)
+				if g then b = math.clamp(math.floor((g.AbsolutePosition.X - wx) / ww * 7 + 0.5), 0, 7) end
+			end
 			buckets[b] = buckets[b] or {}
 			table.insert(buckets[b], e)
 		end
 	end
 	for k, v in pairs(def) do Theme[k] = v end
 	local function apply(list)
+		-- A newer SetTheme call supersedes delayed buckets from this one.
+		if gen ~= ThemeGen or MX.Dead then return end
 		for _, e in ipairs(list) do
 			if e.o.Parent then
-				if sweep then Tween(e.o, { [e.p] = def[e.t] }, 0.2) else e.o[e.p] = def[e.t] end
+				local v = def[e.t]
+				if v ~= nil then
+					local st = Active[e.o]
+					local running = st and st[e.p]
+					if sweep then
+						Tween(e.o, { [e.p] = v }, 0.2)
+					else
+						-- Cancel hover/press tweens so they don't finish on the old theme colour.
+						if running then running:Cancel() st[e.p] = nil end
+						e.o[e.p] = v
+					end
+				end
 			end
 		end
 	end
