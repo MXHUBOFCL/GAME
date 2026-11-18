@@ -3026,7 +3026,7 @@ function Container:AddKeybind(o)
 			end
 			MX:_KeyListRefresh()
 		end, function() return obj.State end)
-	elseif o.Default then
+	elseif o.Default and not table.find(MenuKeys, o.Default) then
 		MX:SetMenuKey(o.Default)
 	end
 	function obj:Get() return self.Key end
@@ -3595,8 +3595,9 @@ function Window:_Fit()
 end
 
 function Window:SetScale(s)
-	MX.UserScale = math.clamp(s, 0.5, 1.6)
+	MX.UserScale = math.clamp(tonumber(s) or 1, 0.5, 1.6)
 	self:_Fit()
+	SyncOpt("ui_scale", MX.UserScale)
 end
 function Window:SetSidebar(v)
 	self.Collapsed = v and true or false
@@ -3844,7 +3845,6 @@ function MX:CreateWindow(o)
 		end)
 	end
 
-	local gearMenu, gearFrame, gearRefs
 	local lb, lh, lic = PaletteButton(hr, "unlock", 3, bsz, false)
 	local function paintLock()
 		local id = MX:GetIcon(MX.Locked and "lock" or "unlock")
@@ -3863,37 +3863,20 @@ function MX:CreateWindow(o)
 		MX:SetLocked(not MX.Locked)
 	end)
 	local gb, gh = PaletteButton(hr, "settings", 4, bsz)
+	win.QuickButton = gb
+	MX:Tip(gh, "Quick Settings")
 	gh.Activated:Connect(function()
-		if not gearMenu then
-			gearRefs = {}
-			gearMenu, gearFrame = MakeMenu("Quick Settings", 240)
-			gearRefs.glass = gearMenu:AddToggle({ Title = "Glass", Style = "Switch", Callback = function(v) MX:SetGlass(v) end })
-			gearRefs.wm = gearMenu:AddToggle({ Title = "Watermark", Style = "Switch", Callback = function(v) if MX.Watermark then MX.Watermark:SetVisible(v) end end })
-			gearRefs.kl = gearMenu:AddToggle({ Title = "Keybind List", Style = "Switch", Callback = function(v) if MX.KeyList then MX.KeyList:SetVisible(v) end end })
-			gearRefs.stars = gearMenu:AddToggle({ Title = "Shooting Stars", Style = "Switch", Callback = function(v) win:SetStars(v) end })
-			gearRefs.scale = gearMenu:AddSlider({ Title = "UI Scale", Min = 0.6, Max = 1.4, Increment = 0.05, Default = MX.UserScale, Callback = function(v) win:SetScale(v) end })
-			gearRefs.mob = gearMenu:AddToggle({ Title = "Mobile Button", Style = "Switch", Callback = function(v) win:SetMobileButton(v) end })
-			gearRefs.lock = gearMenu:AddToggle({ Title = "Lock UI", Description = "Stops windows and buttons from being moved", Style = "Switch", Callback = function(v) MX:SetLocked(v) end })
-			if MX.Discord then
-				gearMenu:AddButton({ Title = "Copy Discord Invite", Callback = function() Copy(MX.Discord) MX:Notify({ Type = "Success", Title = "Copied", Content = MX.Discord, Duration = 2 }) end })
-			end
-		end
-		gearRefs.glass:Set(MX.Glass, true)
-		gearRefs.wm:Set(MX.Watermark and MX.Watermark.Visible or false, true)
-		gearRefs.kl:Set(MX.KeyList and MX.KeyList.Visible or false, true)
-		gearRefs.stars:Set(win.Stars and true or false, true)
-		gearRefs.scale:Set(MX.UserScale, true)
-		gearRefs.mob:Set(win.MobileBtn ~= nil, true)
-		gearRefs.lock:Set(MX.Locked, true)
-		ShowMenu(gearMenu, gearFrame, gb)
+		if MX.Dead then return end
+		if not win.QuickMenu then win:_BuildQuickSettings() end
+		win:_SyncQuickSettings()
+		ShowMenu(win.QuickMenu, win.QuickFrame, gb)
 	end)
 
 	local mb, mh = PaletteButton(hr, "minus", 5, bsz)
 	mh.Activated:Connect(function() win:Toggle(false) end)
 	local xb, xh = PaletteButton(hr, "x", 6, bsz)
-	xh.Activated:Connect(function()
-		win:Dialog({ Title = "Unload MX?", Content = "The UI closes completely. Run the script again to bring it back.", Buttons = { { Title = "Unload", Primary = true, Callback = function() MX:Destroy() end }, { Title = "Stay" } } })
-	end)
+	MX:Tip(xh, "Unload Script")
+	xh.Activated:Connect(function() win:ConfirmUnload() end)
 
 	local startPos
 	Drag(header, {
@@ -3984,6 +3967,8 @@ function MX:CreateWindow(o)
 	if mbOpt == true or type(mbOpt) == "table" or (mbOpt == "Auto" and Touch) then
 		win:SetMobileButton(true, type(mbOpt) == "table" and mbOpt or nil)
 	end
+	-- Built eagerly so its flags (glass, watermark, ui_scale, ...) exist before LoadConfig/LoadAutoConfig.
+	win:_BuildQuickSettings()
 	return win
 end
 
@@ -4001,7 +3986,8 @@ function Window:SetMobileButton(on, opts)
 		for _, c in ipairs(self._mbConns) do c:Disconnect() end
 		self._mbConns = nil
 	end
-	if not on then return end
+	SyncOpt("mobile_button", on and true or false)
+	if not on or MX.Dead then return end
 	opts = opts or self.MobileOpts or {}
 	self.MobileOpts = opts
 	local size = opts.Size or 46
@@ -4061,11 +4047,55 @@ function Window:SetMobileButton(on, opts)
 	self:_UpdateMobileBtn()
 end
 
+-- Flags owned by the library itself; they are not "features" and are not reset on unload.
+local InternalFlags = { glass = true, watermark = true, keybind_list = true, mobile_button = true, ui_scale = true, ui_locked = true, menu_key = true, theme = true, themefade = true, stars = true }
+MX.UnloadCallbacks = {}
+MX.UnloadResetsToggles = true
+function MX:OnUnload(fn)
+	if type(fn) == "function" then table.insert(MX.UnloadCallbacks, fn) end
+end
+
 function MX:Destroy()
 	if MX.Dead then return end
+	-- 1) Let the script switch its features off while everything still exists.
+	if MX.UnloadResetsToggles then
+		for flag, obj in pairs(MX.Options) do
+			if type(obj) == "table" and not InternalFlags[flag] and flag:sub(1, 3) ~= "fx_" and flag:sub(1, 1) ~= "_" then
+				if obj.Type == "Toggle" and obj.Value == true then
+					pcall(obj.Set, obj, false)
+				elseif obj.Type == "Slider" and obj.ToggleValue == true then
+					pcall(obj.SetToggle, obj, false)
+				end
+			end
+		end
+	end
+	for _, fn in ipairs(MX.UnloadCallbacks) do
+		local ok, err = pcall(fn)
+		if not ok then warn("[MX] OnUnload: " .. tostring(err)) end
+	end
+	-- 2) Stop everything: popups (RenderStepped), effects, loops, binds, connections.
+	pcall(function() MX:CloseAllPopups() end)
 	MX.Dead = true
+	MX.Listening = false
+	if MX._listenConn then pcall(function() MX._listenConn:Disconnect() end) MX._listenConn = nil end
+	for _, w in ipairs(MX.Windows) do
+		w.Open = false
+		w.Stars = false
+		if w._fxStop then pcall(w._fxStop) end
+	end
+	if MX.Watermark then MX.Watermark.Dead = true end
 	for _, c in ipairs(Conns) do pcall(function() c:Disconnect() end) end
-	if Gui then Gui:Destroy() end
+	table.clear(Conns)
+	table.clear(MX.Binds)
+	table.clear(MX.ThemeListeners)
+	table.clear(MX.LockListeners)
+	table.clear(MX.ConfigListeners)
+	table.clear(GlassHooks)
+	table.clear(GlassReg)
+	table.clear(Reg)
+	-- 3) Remove the GUI (destroys every instance-owned connection and tween target).
+	if Gui then pcall(function() Gui:Destroy() end) end
+	MX.Watermark, MX.KeyList, MX.Window = nil, nil, nil
 	if genv.MXUI == MX then genv.MXUI = nil end
 end
 
@@ -4080,7 +4110,9 @@ local Corners = {
 local function Place(frame, corner, margin)
 	local c = Corners[corner] or Corners.TopRight
 	frame.AnchorPoint = c[1]
-	frame.Position = UDim2.new(c[2], c[4] * margin, c[3], c[5] * margin)
+	-- The ScreenGui ignores the GUI inset, so keep top-anchored widgets below Roblox's top bar.
+	local top = c[3] == 0 and TopInset() or 0
+	frame.Position = UDim2.new(c[2], c[4] * margin, c[3], c[5] * margin + top)
 end
 
 function MX:CreateWatermark(o)
@@ -4162,12 +4194,22 @@ function MX:CreateWatermark(o)
 	end
 	function wm:SetTitle(t) if titleLbl then titleLbl.Text = tostring(t) end end
 	function wm:SetPosition(c) Place(frame, c, o.Margin or 10) end
-	function wm:SetVisible(v) self.Visible = v and true or false frame.Visible = self.Visible end
+	function wm:SetVisible(v)
+		self.Visible = v and true or false
+		frame.Visible = self.Visible
+		if self.Visible then
+			for _, it in ipairs(self.Items) do it:Update() end
+		end
+		if MX.Watermark == self then SyncOpt("watermark", self.Visible) end
+	end
 	function wm:Toggle() self:SetVisible(not self.Visible) end
 	function wm:Destroy()
 		self.Dead = true
 		frame:Destroy()
-		if MX.Watermark == self then MX.Watermark = nil end
+		if MX.Watermark == self then
+			MX.Watermark = nil
+			SyncOpt("watermark", false)
+		end
 	end
 	if o.Items then
 		for _, it in ipairs(o.Items) do wm:Add(it[1], it[2]) end
@@ -4184,8 +4226,26 @@ function MX:CreateWatermark(o)
 		end
 	end)
 	MX.Watermark = wm
+	SyncOpt("watermark", wm.Visible)
 	return wm
 end
+
+-- Quick Settings / API helper: creates a default watermark the first time it is enabled.
+function MX:SetWatermark(v)
+	v = v and true or false
+	if MX.Dead then return end
+	if v and not MX.Watermark then MX:CreateWatermark({ Visible = true }) end
+	if MX.Watermark then MX.Watermark:SetVisible(v) else SyncOpt("watermark", false) end
+end
+function MX:GetWatermark() return MX.Watermark ~= nil and MX.Watermark.Visible end
+
+function MX:SetKeybindList(v)
+	v = v and true or false
+	if MX.Dead then return end
+	if v and not MX.KeyList then MX:CreateKeybindList({ Visible = true }) end
+	if MX.KeyList then MX.KeyList:SetVisible(v) else SyncOpt("keybind_list", false) end
+end
+function MX:GetKeybindList() return MX.KeyList ~= nil and MX.KeyList.Visible end
 
 function MX:CreateKeybindList(o)
 	o = o or {}
@@ -4224,7 +4284,7 @@ function MX:CreateKeybindList(o)
 			end
 		end
 		self.Count = #parts
-		frame.Visible = self.Visible and #parts > 0
+		frame.Visible = self.Visible
 		local sig = table.concat(parts, ";") .. tostring(self.OnlyActive) .. MX.ThemeName
 		if sig == self._sig then return end
 		self._sig = sig
@@ -4249,23 +4309,32 @@ function MX:CreateKeybindList(o)
 				end
 			end
 		end
+		if n == 0 then
+			Lbl(frame, { Text = #parts == 0 and "No keybinds yet" or "No active keybinds", Size = UDim2.new(1, 0, 0, 20), TextSize = 12, Font = FONT.Reg, LayoutOrder = 1 }, "Sub")
+		end
 	end
 	function kl:SetKey(k) self.Key = k end
 	function kl:SetVisible(v)
 		self.Visible = v and true or false
-		frame.Visible = self.Visible and (self.Count or 0) > 0
+		frame.Visible = self.Visible
+		if self.Visible then self:Refresh() end
+		if MX.KeyList == self then SyncOpt("keybind_list", self.Visible) end
 	end
 	function kl:Toggle() self:SetVisible(not self.Visible) end
 	function kl:Destroy()
 		self._c:Disconnect()
 		frame:Destroy()
-		if MX.KeyList == self then MX.KeyList = nil end
+		if MX.KeyList == self then
+			MX.KeyList = nil
+			SyncOpt("keybind_list", false)
+		end
 	end
 	kl._c = Conn(UIS.InputBegan, function(i)
 		if i.KeyCode == kl.Key and not UIS:GetFocusedTextBox() and not MX.Listening then kl:Toggle() end
 	end)
 	MX.KeyList = kl
 	kl:Refresh()
+	SyncOpt("keybind_list", kl.Visible)
 	task.spawn(function()
 		while not MX.Dead and kl._c.Connected do
 			if kl.Visible then kl:Refresh() end
@@ -4522,25 +4591,84 @@ function MX:AddWindow(o)
 end
 function Window:AddWindow(o) return MX:AddWindow(o) end
 
+-- Quick Settings (gear in the header): functional settings.
+function Window:_BuildQuickSettings()
+	if self.QuickMenu then return self.QuickMenu end
+	local win = self
+	local q, frame = MakeMenu("Quick Settings", 260)
+	self.QuickMenu, self.QuickFrame = q, frame
+	local refs = {}
+	self._quickRefs = refs
+	refs.glass = q:AddToggle({ Title = "Glass", Description = "Translucent window and panels", Flag = "glass", Style = "Switch", Default = MX.Glass, Callback = function(v) MX:SetGlass(v) end })
+	refs.wm = q:AddToggle({ Title = "Watermark", Description = "FPS / ping overlay, drag to move", Flag = "watermark", Style = "Switch", Default = MX:GetWatermark(), Callback = function(v) MX:SetWatermark(v) end })
+	refs.kl = q:AddToggle({ Title = "Keybind List", Flag = "keybind_list", Style = "Switch", Default = MX:GetKeybindList(), Callback = function(v) MX:SetKeybindList(v) end })
+	refs.mob = q:AddToggle({ Title = "Mobile Button", Description = "Floating button that opens and closes the menu", Flag = "mobile_button", Style = "Switch", Default = win.MobileBtn ~= nil, Callback = function(v) win:SetMobileButton(v) end })
+	refs.scale = q:AddSlider({ Title = "UI Scale", Flag = "ui_scale", Min = 0.6, Max = 1.4, Increment = 0.05, Default = MX.UserScale, Callback = function(v) win:SetScale(v) end })
+	refs.lock = q:AddToggle({ Title = "Lock UI", Description = "Stops windows and buttons from being moved", Flag = "ui_locked", Style = "Switch", Default = MX.Locked, Callback = function(v) MX:SetLocked(v) end })
+	local mk
+	for i = #MenuKeys, 1, -1 do
+		if MenuKeys[i] ~= Enum.KeyCode.Insert then mk = MenuKeys[i] break end
+	end
+	q:AddKeybind({ Title = "Menu Key", Description = "INSERT always works too", Flag = "menu_key", Default = mk, MenuKey = true })
+	if FS.ok() then
+		local cfgBtn
+		cfgBtn = q:AddButton({ Title = "Configs", Description = "Create, load, save and auto-load", Callback = function() win:OpenConfigs(cfgBtn and cfgBtn.Row or frame) end })
+	end
+	if MX.Discord then
+		q:AddButton({ Title = "Copy Discord Invite", Callback = function()
+			local ok = Copy(MX.Discord)
+			MX:Notify({ Type = ok and "Success" or "Warning", Title = ok and "Copied" or "Not Supported", Content = ok and MX.Discord or "Your executor has no clipboard.", Duration = 2 })
+		end })
+	end
+	q:AddButton({ Title = "Unload Script", Description = "Removes the UI, effects, loops and keybinds", Callback = function() win:ConfirmUnload() end })
+	return q
+end
+
+function Window:_SyncQuickSettings()
+	local r = self._quickRefs
+	if not r then return end
+	r.glass:Set(MX.Glass, true)
+	r.wm:Set(MX:GetWatermark(), true)
+	r.kl:Set(MX:GetKeybindList(), true)
+	r.mob:Set(self.MobileBtn ~= nil, true)
+	r.scale:Set(MX.UserScale, true)
+	r.lock:Set(MX.Locked, true)
+end
+
+function Window:OpenConfigs(anchor)
+	if MX.Dead then return end
+	if not self._cfgMenu then
+		local m, f = MakeMenu("Configs", 280)
+		m:AddConfigManager()
+		self._cfgMenu, self._cfgFrame = m, f
+	end
+	MX:RefreshConfigs()
+	ShowMenu(self._cfgMenu, self._cfgFrame, anchor)
+end
+
+function Window:ConfirmUnload()
+	if MX.Dead then return end
+	MX:CloseAllPopups()
+	if not self.Open then self:Toggle(true) end
+	self:Dialog({ Title = "Unload Script?", Content = "Removes the UI, effects, loops, keybinds and turns your toggles off. Run the script again to bring it back.", Buttons = {
+		{ Title = "Unload", Primary = true, Callback = function() MX:Destroy() end },
+		{ Title = "Cancel" },
+	} })
+end
+
+-- Settings tab (sidebar): appearance only. Functional settings live in Quick Settings.
 function Window:AddSettingsTab(o)
 	if self._settingsTab then return self._settingsTab end
 	o = o or {}
-	local tab = self:AddTab({ Title = o.Title or "Settings", Icon = "settings" })
-	local look = tab:AddSection({ Title = "Appearance", Icon = "palette" })
+	local win = self
+	local tab = self:AddTab({ Title = o.Title or "Settings", Icon = o.Icon or "palette" })
+	local look = tab:AddSection({ Title = "Theme", Icon = "palette" })
 	look:AddDropdown({ Title = "Theme", Flag = "theme", Values = MX.ThemeOrder, Default = MX.ThemeName, Callback = function(n) MX:SetTheme(n) end })
-	look:AddToggle({ Title = "Glass", Description = "See-through window on top of any theme", Flag = "glass", Style = "Switch", Default = MX.Glass, Callback = function(v) MX:SetGlass(v) end })
-	look:AddSlider({ Title = "UI Scale", Description = "Make everything bigger or smaller", Flag = "ui_scale", Min = 0.6, Max = 1.4, Increment = 0.05, Default = MX.UserScale, Callback = function(v) self:SetScale(v) end })
-	look:AddToggle({ Title = "Theme Fade", Flag = "themefade", Style = "Switch", Default = MX.ThemeSweep, Callback = function(v) MX.ThemeSweep = v end })
-	look:AddToggle({ Title = "Shooting Stars", Flag = "stars", Style = "Switch", Default = self.Stars, Callback = function(v) self:SetStars(v) end })
-	look:AddToggle({ Title = "Watermark", Flag = "watermark", Default = MX.Watermark ~= nil and MX.Watermark.Visible, Callback = function(v) if MX.Watermark then MX.Watermark:SetVisible(v) end end })
-	look:AddToggle({ Title = "Keybind List", Flag = "keybind_list", Default = MX.KeyList ~= nil and MX.KeyList.Visible, Callback = function(v) if MX.KeyList then MX.KeyList:SetVisible(v) end end })
-	look:AddToggle({ Title = "Mobile Button", Description = "Floating button that opens and closes the menu", Flag = "mobile_button", Style = "Switch", Default = self.MobileBtn ~= nil, Callback = function(v) self:SetMobileButton(v) end })
-	look:AddToggle({ Title = "Lock UI", Description = "Stops windows and buttons from being moved", Flag = "ui_locked", Style = "Switch", Default = MX.Locked, Callback = function(v) MX:SetLocked(v) end })
-	look:AddKeybind({ Title = "Menu Key", Description = "Key that shows and hides the window", Flag = "menu_key", Default = Enum.KeyCode.RightShift, MenuKey = true })
-	local cfg = tab:AddSection({ Title = "Configs", Icon = "folder", Side = "Full" })
-	cfg:AddConfigManager()
-	local danger = tab:AddSection({ Title = "Danger Zone", Icon = "alert-triangle", Side = "Full" })
-	danger:AddButton({ Title = "Unload MX", Description = "Removes the UI and every connection", Hold = true, Callback = function() MX:Destroy() end })
+	look:AddToggle({ Title = "Theme Fade", Description = "Animate colours when switching themes", Flag = "themefade", Style = "Switch", Default = MX.ThemeSweep, Callback = function(v) MX.ThemeSweep = v end })
+	look:AddLabel("Glass, watermark, UI scale, keybind list, configs and unload are in Quick Settings (gear icon in the header).")
+	local fx = tab:AddSection({ Title = "Effects", Icon = "wand" })
+	fx:AddToggle({ Title = "Shooting Stars", Flag = "stars", Style = "Switch", Default = win.Stars, Callback = function(v) win:SetStars(v) end })
+	self.EffectsSection = fx
 	self._settingsTab = tab
 	return tab
 end
