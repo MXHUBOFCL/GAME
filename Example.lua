@@ -1,4 +1,7 @@
-local MX = loadstring(game:HttpGet("https://raw.githubusercontent.com/MXHUBOFCL/GAME/main/Source.lua"))()
+-- Source URL. To test a branch before it is merged, replace "main" with the branch name,
+-- e.g. ".../GAME/fix/settings-themes-effects/Source.lua".
+local SOURCE = "https://raw.githubusercontent.com/MXHUBOFCL/GAME/main/Source.lua"
+local MX = loadstring(game:HttpGet(SOURCE))()
 
 local C = Color3.fromRGB
 MX:AddThemes({
@@ -19,15 +22,26 @@ local Window = MX:CreateWindow({
 	TabWidth = 170,
 	Theme = "Obsidian",
 	MobileButton = "Auto",
+	-- Background effects (also in Settings > Effects): Stars, Snow, Rain, Fire.
+	Effects = { Snow = true },
+	EffectIntensity = 60,
 })
 
+-- Watermark and keybind list can also be switched on/off from Quick Settings (gear icon).
 local Watermark = MX:CreateWatermark({ Title = "MX HUB" })
 Watermark:AddTime()
 
-local KeyList = MX:CreateKeybindList({ Key = Enum.KeyCode.K, Visible = false })
+MX:CreateKeybindList({ Key = Enum.KeyCode.K, Visible = false })
+
+-- Runs when the user presses "Unload Script" in Quick Settings or the X button.
+-- Toggles are switched off automatically first (set MX.UnloadResetsToggles = false to disable).
+MX:OnUnload(function()
+	print("[MX] unloaded, clean up your own loops/instances here")
+end)
 
 Window:AddCategory("Overview")
 local Home = Window:AddTab("Home", "home")
+local Visuals = Window:AddTab({ Title = "Visuals", Icon = "wand" })
 local Elements = Window:AddTab({ Title = "Elements", Icon = "sliders-horizontal", Badge = "NEW" })
 Window:AddCategory("Misc")
 
@@ -35,7 +49,7 @@ Home:AddImage({ Title = "MX HUB", Description = "Tap to copy the Discord invite"
 	MX.Utils.Copy(MX.Discord)
 	MX:Success("Copied", MX.Discord)
 end })
-Home:AddParagraph({ Title = "Welcome", Content = "MX UI works with mouse and touch. Use the lock button in the header to stop the UI from being moved. On phones a round MX button opens and closes the menu, and you can drag it anywhere. On PC use INSERT or RIGHT SHIFT." })
+Home:AddParagraph({ Title = "Welcome", Content = "MX UI works with mouse and touch. The gear icon in the header opens Quick Settings (Glass, Watermark, Keybind List, Mobile Button, UI Scale, Configs, Unload). The Settings tab only holds appearance: themes and effects. On phones a round MX button opens and closes the menu. On PC use INSERT or RIGHT SHIFT." })
 
 local Info = Home:AddSection({ Title = "Labels and Progress", Icon = "activity" })
 local Status = Info:AddLabel("Status: Idle")
@@ -102,11 +116,35 @@ States:AddButton({ Title = "Open Info Window", Callback = function()
 		Rows = { { "Place", "{placeid}" }, { "Time", "{time}" } } })
 end })
 
+local FxSec = Visuals:AddSection({ Title = "Effects From Script", Icon = "flame" })
+for _, name in ipairs({ "Stars", "Snow", "Rain", "Fire" }) do
+	FxSec:AddButton({ Title = "Toggle " .. name, Callback = function()
+		Window:ToggleEffect(name)
+		demo(name, Window:GetEffect(name) and "On" or "Off")
+	end })
+end
+FxSec:AddButton({ Title = "Cozy Preset", Description = "Snow + Fire, Frost theme", Callback = function()
+	Window:SetEffect("Rain", false)
+	Window:SetEffect("Snow", true)
+	Window:SetEffect("Fire", true)
+	MX:SetTheme("Frost")
+end })
+
+local QuickSec = Visuals:AddSection({ Title = "Quick Settings From Script", Icon = "settings" })
+QuickSec:AddButton({ Title = "Toggle Glass", Callback = function() MX:SetGlass(not MX:GetGlass()) end })
+QuickSec:AddButton({ Title = "Toggle Watermark", Callback = function() MX:SetWatermark(not MX:GetWatermark()) end })
+QuickSec:AddButton({ Title = "Toggle Keybind List", Callback = function() MX:SetKeybindList(not MX:GetKeybindList()) end })
+QuickSec:AddButton({ Title = "Random Theme", Callback = function()
+	local list = MX.ThemeOrder
+	MX:SetTheme(list[math.random(1, #list)])
+end })
+
 local Tabs = Elements:AddSection({ Title = "Inner Tabs", Icon = "layers", Side = "Full" })
 local Inner = Tabs:AddTabs({ "First", "Second" })
 Inner.Pages.First:AddToggle({ Title = "Toggle On First", Flag = "inner_t" })
 Inner.Pages.Second:AddButton({ Title = "Back To First", Callback = function() Inner:Select("First") end })
 
+-- Settings tab = Theme + Effects. Everything functional lives in Quick Settings.
 Window:AddSettingsTab()
 MX:LoadAutoConfig()
-MX:Info("MX HUB", "Loaded. Tap the MX button or press INSERT.")
+MX:Info("MX HUB", "Loaded. Tap the MX button or press INSERT. Gear icon = Quick Settings.")
