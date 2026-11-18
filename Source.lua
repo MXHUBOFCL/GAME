@@ -4,7 +4,6 @@ local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local HttpService = game:GetService("HttpService")
 local Stats = game:GetService("Stats")
-local Lighting = game:GetService("Lighting")
 local CoreGui = game:GetService("CoreGui")
 local GuiService = game:GetService("GuiService")
 local LocalPlayer = Players.LocalPlayer
@@ -23,7 +22,7 @@ if genv.MXUI and type(genv.MXUI.Destroy) == "function" then
 end
 
 local MX = {
-	Version = "1.0.0",
+	Version = "1.1.0",
 	Brand = "MX",
 	Flags = {},
 	Options = {},
@@ -36,8 +35,6 @@ local MX = {
 	WelcomeImage = 113267102798729,
 	ConfigFolder = "MXUI",
 	Glass = false,
-	GlassBlur = true,
-	BlurMode = "Parts",
 	UserScale = 1,
 	Scale = 1,
 	NotifyEnabled = true,
@@ -55,7 +52,23 @@ local Conns = {}
 local function Conn(sig, fn)
 	local c = sig:Connect(fn)
 	Conns[#Conns + 1] = c
+	if #Conns > 256 then
+		local w = 0
+		for i = 1, #Conns do
+			local x = Conns[i]
+			if x.Connected then
+				w += 1
+				Conns[w] = x
+			end
+		end
+		for i = #Conns, w + 1, -1 do Conns[i] = nil end
+	end
 	return c
+end
+
+local function SyncOpt(flag, v)
+	local o = MX.Options[flag]
+	if o and type(o.Set) == "function" and o.Value ~= v then pcall(o.Set, o, v, true) end
 end
 
 local function New(class, props, parent)
@@ -114,20 +127,35 @@ local Theme = {}
 local Reg, GlassReg = {}, {}
 MX.Theme = Theme
 
+local ThemeKeys = { "Window", "Side", "Panel", "Card", "Element", "Hover", "Accent", "Text", "Sub", "Off" }
+local ThemeFallback = {
+	Window = C3(14, 14, 18), Side = C3(9, 9, 12), Panel = C3(18, 18, 23), Card = C3(23, 23, 30), Element = C3(32, 32, 41),
+	Hover = C3(44, 44, 57), Accent = C3(236, 60, 84), Text = C3(240, 240, 246), Sub = C3(150, 152, 170), Off = C3(52, 52, 64),
+}
+
 function MX:AddThemes(t)
+	if type(t) ~= "table" then return end
 	local names = {}
-	for name in pairs(t) do names[#names + 1] = name end
+	for name, d in pairs(t) do
+		if type(name) == "string" and type(d) == "table" then names[#names + 1] = name end
+	end
 	table.sort(names)
 	for _, name in ipairs(names) do
-		local d = t[name]
-		if not d.Border then
+		local d = table.clone(t[name])
+		for _, k in ipairs(ThemeKeys) do
+			if typeof(d[k]) ~= "Color3" then
+				if d[k] ~= nil then warn("[MX] Theme '" .. name .. "': " .. k .. " is not a Color3, using default") end
+				d[k] = ThemeFallback[k]
+			end
+		end
+		if typeof(d.Border) ~= "Color3" then
 			d.Border = d.Card:Lerp(d.Text, Lum(d.Card) > 0.5 and 0.3 or 0.38)
 		end
-		d.OnAccent = d.OnAccent or (Lum(d.Accent) > 0.62 and C3(20, 20, 24) or C3(255, 255, 255))
-		d.Success = d.Success or C3(86, 214, 140)
-		d.Warning = d.Warning or C3(245, 180, 66)
-		d.Danger = d.Danger or C3(236, 80, 90)
-		if not MX.Themes[name] then table.insert(MX.ThemeOrder, name) end
+		if typeof(d.OnAccent) ~= "Color3" then d.OnAccent = Lum(d.Accent) > 0.62 and C3(20, 20, 24) or C3(255, 255, 255) end
+		if typeof(d.Success) ~= "Color3" then d.Success = C3(86, 214, 140) end
+		if typeof(d.Warning) ~= "Color3" then d.Warning = C3(245, 180, 66) end
+		if typeof(d.Danger) ~= "Color3" then d.Danger = C3(236, 80, 90) end
+		if not MX.Themes[name] and not table.find(MX.ThemeOrder, name) then table.insert(MX.ThemeOrder, name) end
 		MX.Themes[name] = d
 	end
 end
@@ -140,7 +168,7 @@ MX:AddThemes({
 	["Sunset"] = { Window = C3(22, 13, 14), Side = C3(15, 8, 9), Panel = C3(27, 16, 17), Card = C3(34, 21, 22), Element = C3(47, 30, 31), Hover = C3(63, 41, 42), Border = C3(92, 62, 62), Accent = C3(255, 128, 64), Text = C3(252, 242, 238), Sub = C3(186, 150, 142), Off = C3(70, 48, 48) },
 
 	Rose = { Window = C3(28, 18, 22), Side = C3(22, 14, 18), Panel = C3(32, 21, 26), Card = C3(38, 25, 31), Element = C3(50, 33, 41), Hover = C3(64, 44, 54), Accent = C3(255, 120, 170), Text = C3(252, 238, 244), Sub = C3(176, 140, 154), Off = C3(82, 58, 70) },
-	Crimson = { Window = C3(19, 19, 19), Side = C3(14, 14, 14), Panel = C3(17, 17, 17), Card = C3(13, 13, 13), Element = C3(27, 27, 27), Hover = C3(38, 38, 38), Accent = C3(255, 24, 24), Text = C3(240, 240, 240), Sub = C3(112, 112, 112), Off = C3(34, 34, 34) },
+	Crimson = { Window = C3(15, 15, 15), Side = C3(10, 10, 10), Panel = C3(18, 18, 18), Card = C3(23, 23, 23), Element = C3(31, 31, 31), Hover = C3(43, 43, 43), Accent = C3(235, 36, 44), Text = C3(240, 240, 240), Sub = C3(132, 132, 132), Off = C3(46, 46, 46) },
 	Onyx = { Window = C3(10, 10, 10), Side = C3(5, 5, 5), Panel = C3(8, 8, 8), Card = C3(14, 14, 14), Element = C3(22, 22, 22), Hover = C3(34, 34, 34), Accent = C3(255, 255, 255), Text = C3(245, 245, 245), Sub = C3(140, 140, 140), Off = C3(42, 42, 42), OnAccent = C3(10, 10, 10) },
 	Dark = { Window = C3(24, 24, 26), Side = C3(19, 19, 21), Panel = C3(28, 28, 31), Card = C3(33, 33, 37), Element = C3(42, 42, 47), Hover = C3(54, 54, 60), Accent = C3(96, 205, 255), Text = C3(240, 240, 244), Sub = C3(140, 142, 152), Off = C3(70, 70, 80) },
 	Darker = { Window = C3(12, 12, 14), Side = C3(8, 8, 10), Panel = C3(15, 15, 18), Card = C3(20, 20, 24), Element = C3(28, 28, 33), Hover = C3(38, 38, 44), Accent = C3(96, 205, 255), Text = C3(240, 240, 244), Sub = C3(130, 132, 144), Off = C3(48, 48, 58) },
@@ -154,10 +182,12 @@ MX:AddThemes({
 	["Mono"] = { Window = C3(12, 12, 12), Side = C3(7, 7, 7), Panel = C3(16, 16, 16), Card = C3(22, 22, 22), Element = C3(31, 31, 31), Hover = C3(43, 43, 43), Border = C3(64, 64, 64), Accent = C3(235, 235, 235), Text = C3(245, 245, 245), Sub = C3(140, 140, 140), Off = C3(50, 50, 50) },
 })
 do
-	local order = { "Obsidian", "Frost", "Violet", "Ocean", "Sunset", "Mono", "Rose", "Crimson", "Onyx", "Dark", "Darker", "Light", "Aqua", "Lagoon", "Amethyst", "Toxic", "Noir" }
-	table.insert(order, "Emerald")
-	MX.ThemeOrder = order
-	for k, v in pairs(MX.Themes) do Theme[k] = nil end
+	local order = { "Obsidian", "Frost", "Violet", "Ocean", "Sunset", "Mono", "Rose", "Crimson", "Onyx", "Dark", "Darker", "Light", "Aqua", "Lagoon", "Amethyst", "Toxic", "Noir", "Emerald" }
+	for _, n in ipairs(MX.ThemeOrder) do
+		if not table.find(order, n) then table.insert(order, n) end
+	end
+	table.clear(MX.ThemeOrder)
+	for _, n in ipairs(order) do table.insert(MX.ThemeOrder, n) end
 	for k, v in pairs(MX.Themes["Obsidian"]) do Theme[k] = v end
 end
 
@@ -224,7 +254,12 @@ local function Bind(o, map)
 	end
 end
 local function GlassOn(o, a)
-	GlassReg[#GlassReg + 1] = { o = o, a = a }
+	if #GlassReg > 400 then
+		for i = #GlassReg, 1, -1 do
+			if not GlassReg[i].o.Parent then table.remove(GlassReg, i) end
+		end
+	end
+	GlassReg[#GlassReg + 1] = { o = o, a = a, base = o.BackgroundTransparency }
 	if MX.Glass then o.BackgroundTransparency = a end
 end
 
@@ -304,7 +339,6 @@ local function TopInset()
 	return t
 end
 local function ToGui(raw) return raw end
-local function ToRaw(gui) return gui end
 local function GuiPos(i)
 	return Vector2.new(i.Position.X, i.Position.Y) + PtrD
 end
@@ -338,12 +372,12 @@ local function Drag(handle, o)
 			if o.Lock then MX:ScrollLock(false) end
 			if o.End then o.End() end
 		end
-		cm = UIS.InputChanged:Connect(function(i)
+		cm = Conn(UIS.InputChanged, function(i)
 			if i.UserInputType == Enum.UserInputType.MouseMovement or i == input then
 				o.Move(GuiPos(i), originG)
 			end
 		end)
-		ce = UIS.InputEnded:Connect(function(i)
+		ce = Conn(UIS.InputEnded, function(i)
 			if i == input or (t == Enum.UserInputType.MouseButton1 and i.UserInputType == t) then stop() end
 		end)
 		o.Move(originG, originG)
@@ -1359,7 +1393,7 @@ function MX:ShowPopup(f, anchor, opts)
 	f.Visible = true
 	Overlay.Visible = true
 	PlacePopup(p)
-	p.conn = RunService.RenderStepped:Connect(function()
+	p.conn = Conn(RunService.RenderStepped, function()
 		if not MX.Dead and f.Visible then PlacePopup(p) end
 	end)
 end
@@ -1407,7 +1441,7 @@ function MX:Listen(cb)
 	if MX.Listening then return end
 	MX.Listening = true
 	local c
-	c = UIS.InputBegan:Connect(function(input)
+	c = Conn(UIS.InputBegan, function(input)
 		local t = input.UserInputType
 		local result, ok = nil, false
 		if t == Enum.UserInputType.Keyboard then
@@ -1422,9 +1456,11 @@ function MX:Listen(cb)
 		end
 		if not ok then return end
 		c:Disconnect()
+		MX._listenConn = nil
 		task.delay(0.08, function() MX.Listening = false end)
 		cb(result)
 	end)
+	MX._listenConn = c
 end
 
 local function MakeBind(name, mode, key, fire, active)
@@ -1511,7 +1547,7 @@ local function Hex(c) return string.format("#%02x%02x%02x", math.floor(c.R * 255
 
 local NoteHolder = New("Frame", {
 	Name = "Notes", BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.new(0, Mobile and 250 or 280, 0, 0), AutomaticSize = AY,
-	AnchorPoint = Vector2.new(0, 0), Position = UDim2.new(0, 10, 0, 8),
+	AnchorPoint = Vector2.new(0, 0), Position = UDim2.new(0, 10, 0, TopInset() + 8),
 }, NoteLayer)
 List(NoteHolder, 8, Enum.FillDirection.Vertical, Enum.HorizontalAlignment.Left)
 Scaled(NoteHolder)
@@ -1594,12 +1630,6 @@ for _, k in ipairs({ "Info", "Success", "Warning", "Error" }) do
 	end
 end
 
-local function JEnc(v)
-	if typeof(v) == "Color3" then return { __c = { v.R, v.G, v.B } } end
-	if typeof(v) == "EnumItem" then return { __e = tostring(v) } end
-	return v
-end
-
 local function CleanName(n) return (tostring(n or ""):gsub("[\\/:*?\"<>|]", ""):match("^%s*(.-)%s*$")) end
 
 function MX:SaveConfig(name)
@@ -1646,6 +1676,7 @@ function MX:DeleteConfig(name)
 	name = CleanName(name)
 	if not (delfile and isfile) then return false end
 	local p = MX.ConfigFolder .. "/" .. name .. ".json"
+	if MX:GetAutoLoad() == name then MX:SetAutoLoad(nil) end
 	if isfile(p) then return pcall(delfile, p) end
 	return false
 end
@@ -1690,186 +1721,26 @@ end
 
 MX.Utils.Copy = function(t) return Copy(t) end
 
-local Blur, BlurConn
-local BlurSlots, BlurParts, BlurOffs, BlurCFs, BlurN = {}, {}, {}, {}, 0
-local BlurSig, BlurLastCF = { 0, 0, 0, 0, 0, 0, 0, 0 }, nil
-local BLUR_DIST, BLUR_STEPS, BLUR_RADIUS = 0.001, 8, 12
-
-local function GetSlot(i)
-	local s = BlurSlots[i]
-	if not s then
-		local part = Instance.new("Part")
-		part.Name = "MX_Glass"
-		part.Color = Color3.new(0, 0, 0)
-		part.Material = Enum.Material.Glass
-		part.Size = Vector3.new(1, 1, 0)
-		part.Anchored = true
-		part.CanCollide = false
-		part.CanQuery = false
-		part.CanTouch = false
-		part.Locked = true
-		part.CastShadow = false
-		part.Transparency = 0.98
-		local mesh = Instance.new("SpecialMesh")
-		mesh.MeshType = Enum.MeshType.Brick
-		mesh.Offset = Vector3.new(0, 0, -0.000001)
-		mesh.Parent = part
-		s = { part = part, mesh = mesh }
-		BlurSlots[i] = s
-	end
-	return s
-end
-local function HideFrom(i)
-	for n = i, #BlurSlots do
-		local s = BlurSlots[n]
-		if s and s.part.Parent then s.part.Parent = nil end
-	end
-end
-
-local function StopBlur()
-	if BlurConn then BlurConn:Disconnect() BlurConn = nil end
-	for _, s in ipairs(BlurSlots) do pcall(function() s.part:Destroy() end) end
-	BlurSlots, BlurParts, BlurOffs, BlurCFs, BlurN = {}, {}, {}, {}, 0
-	BlurSig = { 0, 0, 0, 0, 0, 0, 0, 0 }
-	local fx = Blur
-	Blur = nil
-	if fx then
-		local prop = fx:IsA("BlurEffect") and "Size" or "NearIntensity"
-		pcall(function() TweenService:Create(fx, TweenInfo.new(0.2), { [prop] = 0 }):Play() end)
-		task.delay(0.25, function() pcall(function() fx:Destroy() end) end)
-	end
-end
-
-local function BlurStep()
-	local cam = workspace.CurrentCamera
-	local win = MX.Window
-	if not cam or not win then return end
-	local main = win.Main
-	if not (win.Open and main.Parent and main.Visible) then
-		if BlurSig[1] ~= -1 then
-			BlurSig[1] = -1
-			BlurN = 0
-			HideFrom(1)
-		end
-		return
-	end
-	local pos = ToRaw(main.AbsolutePosition)
-	local size = main.AbsoluteSize
-	local ins = 6
-	local x0, y0, x1, y1 = pos.X + ins, pos.Y + ins, pos.X + size.X - ins, pos.Y + size.Y - ins
-	local bw, bh = x1 - x0, y1 - y0
-	if bw <= 1 or bh <= 1 then
-		HideFrom(1)
-		return
-	end
-	local radius = math.clamp(BLUR_RADIUS * MX.Scale + ins * 0.5, 0, math.min(bw, bh) / 2)
-	local vp, fov, camCF = cam.ViewportSize, cam.FieldOfView, cam.CFrame
-	local sg = BlurSig
-	local first = BlurSlots[1]
-	local changed = not (first and first.built) or sg[1] ~= x0 or sg[2] ~= y0 or sg[3] ~= x1 or sg[4] ~= y1 or sg[5] ~= radius or sg[6] ~= vp.X or sg[7] ~= vp.Y or sg[8] ~= fov
-	if changed then
-		sg[1], sg[2], sg[3], sg[4], sg[5], sg[6], sg[7], sg[8] = x0, y0, x1, y1, radius, vp.X, vp.Y, fov
-		local rects, n = {}, 0
-		local function add(a, b, c, d)
-			n += 1
-			rects[n] = { a, b, c, d }
-		end
-		if radius < 2 then
-			add(x0, y0, x1, y1)
-		else
-			add(x0, y0 + radius, x1, y1 - radius)
-			local band = radius / BLUR_STEPS
-			for st = 1, BLUR_STEPS do
-				local top = (st - 1) * band
-				local dy = radius - (top + band / 2)
-				local cut = radius - math.sqrt(math.max(radius * radius - dy * dy, 0))
-				add(x0 + cut, y0 + top, x1 - cut, y0 + top + band + 1)
-				add(x0 + cut, y1 - top - band - 1, x1 - cut, y1 - top)
-			end
-		end
-		local function at(x, y)
-			local ray = cam:ViewportPointToRay(x, y)
-			return camCF:PointToObjectSpace(ray.Origin + ray.Direction * BLUR_DIST)
-		end
-		BlurN = 0
-		for i = 1, n do
-			local r = rects[i]
-			local s = GetSlot(i)
-			s.built = true
-			if r[3] - r[1] < 1 or r[4] - r[2] < 1 then
-				if s.part.Parent then s.part.Parent = nil end
-			else
-				local tl, tr, br = at(r[1], r[2]), at(r[3], r[2]), at(r[3], r[4])
-				s.off = CFrame.fromMatrix((tl + br) / 2, Vector3.xAxis, Vector3.yAxis)
-				s.mesh.Scale = Vector3.new((tr - tl).Magnitude, (tr - br).Magnitude, 0)
-				if s.part.Parent ~= cam then s.part.Parent = cam end
-				BlurN += 1
-				BlurParts[BlurN] = s.part
-				BlurOffs[BlurN] = s.off
-			end
-		end
-		for i = #BlurParts, BlurN + 1, -1 do
-			BlurParts[i] = nil
-			BlurOffs[i] = nil
-			BlurCFs[i] = nil
-		end
-		HideFrom(n + 1)
-	elseif camCF == BlurLastCF then
-		return
-	end
-	BlurLastCF = camCF
-	for i = 1, BlurN do BlurCFs[i] = camCF * BlurOffs[i] end
-	local ok = pcall(workspace.BulkMoveTo, workspace, BlurParts, BlurCFs, Enum.BulkMoveMode.FireCFrameChanged)
-	if not ok then
-		for i = 1, BlurN do BlurParts[i].CFrame = BlurCFs[i] end
-	end
-end
-
-local function StartBlur()
-	if Blur or BlurConn then return end
-	if MX.BlurMode == "Screen" then
-		local fx = Instance.new("BlurEffect")
-		fx.Name = "MX_Blur"
-		fx.Size = 0
-		pcall(function() fx.Parent = Lighting end)
-		Blur = fx
-		TweenService:Create(fx, TweenInfo.new(0.25), { Size = MX.BlurSize or 16 }):Play()
-		return
-	end
-	local dof = Instance.new("DepthOfFieldEffect")
-	dof.Name = "MX_Blur"
-	dof.FarIntensity = 0
-	dof.InFocusRadius = 0.1
-	dof.FocusDistance = 0.05
-	dof.NearIntensity = 0
-	pcall(function() dof.Parent = Lighting end)
-	Blur = dof
-	TweenService:Create(dof, TweenInfo.new(0.25), { NearIntensity = 1 }):Play()
-	BlurConn = RunService.RenderStepped:Connect(BlurStep)
-end
-
-function MX:_UpdateBlur()
-	local want = MX.Glass and MX.GlassBlur and MX.Window and MX.Window.Open
-	if want then StartBlur() else StopBlur() end
-end
+local GlassHooks = {}
 function MX:SetGlass(v)
 	MX.Glass = v and true or false
 	for i = #GlassReg, 1, -1 do
 		local e = GlassReg[i]
-		if e.o.Parent then Tween(e.o, { BackgroundTransparency = MX.Glass and e.a or 0 }, 0.25) else table.remove(GlassReg, i) end
+		if e.o.Parent then
+			Tween(e.o, { BackgroundTransparency = MX.Glass and e.a or e.base }, 0.25)
+		else
+			table.remove(GlassReg, i)
+		end
 	end
-	if MX.Options.glass and MX.Options.glass.Value ~= MX.Glass then MX.Options.glass:Set(MX.Glass, true) end
-	MX:_UpdateBlur()
+	for i = #GlassHooks, 1, -1 do
+		local ok, alive = pcall(GlassHooks[i], MX.Glass)
+		if ok and alive == false then table.remove(GlassHooks, i) end
+	end
+	SyncOpt("glass", MX.Glass)
 end
 function MX:GetGlass() return MX.Glass end
-function MX:SetGlassBlur(v)
-	MX.GlassBlur = v and true or false
-	MX:_UpdateBlur()
-end
-function MX:SetBlurSize(v)
-	MX.BlurSize = math.clamp(tonumber(v) or 16, 0, 56)
-	if Blur and Blur:IsA("BlurEffect") then Blur.Size = MX.BlurSize end
-end
+function MX:SetGlassBlur() end
+function MX:SetBlurSize() end
 
 MX.ThemeListeners = {}
 local function Watch(inst, fn)
@@ -1880,12 +1751,20 @@ local function Watch(inst, fn)
 	end)
 end
 
+local function GuiAnchor(o)
+	if o:IsA("GuiObject") then return o end
+	return o:FindFirstAncestorWhichIsA("GuiObject")
+end
+
+local ThemeGen = 0
 function MX:SetTheme(name, instant)
 	local def = MX.Themes[name]
-	if not def then return end
+	if not def or MX.Dead then return end
 	MX.ThemeName = name
+	ThemeGen += 1
+	local gen = ThemeGen
 	local win = MX.Window
-	local sweep = MX.ThemeSweep and not instant and win and win.Open
+	local sweep = MX.ThemeSweep and not instant and win and win.Open and win.Main and win.Main.Parent ~= nil
 	local wx, ww = 0, 1
 	if sweep then wx, ww = win.Main.AbsolutePosition.X, math.max(1, win.Main.AbsoluteSize.X) end
 	local buckets = {}
@@ -1895,16 +1774,30 @@ function MX:SetTheme(name, instant)
 			table.remove(Reg, i)
 		else
 			local b = 0
-			if sweep then b = math.clamp(math.floor((e.o.AbsolutePosition.X - wx) / ww * 7 + 0.5), 0, 7) end
+			if sweep then
+				local g = GuiAnchor(e.o)
+				if g then b = math.clamp(math.floor((g.AbsolutePosition.X - wx) / ww * 7 + 0.5), 0, 7) end
+			end
 			buckets[b] = buckets[b] or {}
 			table.insert(buckets[b], e)
 		end
 	end
 	for k, v in pairs(def) do Theme[k] = v end
 	local function apply(list)
+		if gen ~= ThemeGen or MX.Dead then return end
 		for _, e in ipairs(list) do
 			if e.o.Parent then
-				if sweep then Tween(e.o, { [e.p] = def[e.t] }, 0.2) else e.o[e.p] = def[e.t] end
+				local v = def[e.t]
+				if v ~= nil then
+					local st = Active[e.o]
+					local running = st and st[e.p]
+					if sweep then
+						Tween(e.o, { [e.p] = v }, 0.2)
+					else
+						if running then running:Cancel() st[e.p] = nil end
+						e.o[e.p] = v
+					end
+				end
 			end
 		end
 	end
@@ -2150,7 +2043,7 @@ function Container:AddButton(o)
 				fill.Visible = true
 				local t0 = os.clock()
 				task.spawn(function()
-					while holding do
+					while holding and not MX.Dead do
 						local p = math.clamp((os.clock() - t0) / dur, 0, 1)
 						fill.Size = UDim2.new(p, 0, 1, 0)
 						if p >= 1 then
@@ -2336,7 +2229,7 @@ local function BuildPicker(cp)
 	New("UICorner", { CornerRadius = UDim.new(1, 0) }, rk)
 	local rh = Hit(rt, 3)
 	local sh = New("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY, LayoutOrder = 6 }, f)
-	local sl = New("UIListLayout", { Padding = UDim.new(0, 4), FillDirection = Enum.FillDirection.Horizontal, Wraps = true, SortOrder = Enum.SortOrder.LayoutOrder }, sh)
+	New("UIListLayout", { Padding = UDim.new(0, 4), FillDirection = Enum.FillDirection.Horizontal, Wraps = true, SortOrder = Enum.SortOrder.LayoutOrder }, sh)
 	local function refresh()
 		local col = cp:Get()
 		sv.BackgroundColor3 = Color3.fromHSV(cp.H, 1, 1)
@@ -2443,17 +2336,28 @@ local function MakeMenu(title, width)
 	Pad(f, 8, 8, 8, 8)
 	List(f, 6)
 	Lbl(f, { Text = tostring(title or ""), Font = FONT.Bold, TextSize = 13, Size = UDim2.new(1, 0, 0, 18), LayoutOrder = 0 })
-	local sc = New("ScrollingFrame", { BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY, CanvasSize = UDim2.new(), AutomaticCanvasSize = AY, ScrollBarThickness = 3, ScrollingDirection = Enum.ScrollingDirection.Y, LayoutOrder = 1 }, f)
+	local sc = New("ScrollingFrame", { BackgroundTransparency = 1, BorderSizePixel = 0, Active = true, Selectable = false, ScrollingEnabled = true, ClipsDescendants = true, Size = UDim2.new(1, 0, 0, 60), CanvasSize = UDim2.new(), ScrollBarThickness = Touch and 4 or 3, ScrollingDirection = Enum.ScrollingDirection.Y, ElasticBehavior = Enum.ElasticBehavior.WhenScrollable, ScrollBarInset = Enum.ScrollBarInset.ScrollBar, VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar, LayoutOrder = 1 }, f)
 	Bind(sc, { ScrollBarImageColor3 = "Sub" })
-	local cons = New("UISizeConstraint", { MaxSize = Vector2.new(1e6, 300) }, sc)
-	List(sc, 5)
-	local c = setmetatable({ Content = sc, NoIndex = true, SizeConstraint = cons }, ContainerMT)
+	local layout = List(sc, 5)
+	Pad(sc, 0, 2, 0, 0)
+	local c = setmetatable({ Content = sc, NoIndex = true }, ContainerMT)
+	c.MaxH = 300
+	function c:_Fit()
+		if not sc.Parent then return end
+		local h = layout.AbsoluteContentSize.Y / math.max(MX.Scale, 0.01)
+		sc.CanvasSize = UDim2.fromOffset(0, h + 2)
+		sc.Size = UDim2.new(1, 0, 0, math.max(30, math.min(h + 2, c.MaxH)))
+	end
+	layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function() c:_Fit() end)
+	c.Scroll, c.Layout = sc, layout
 	return c, f
 end
 
 local function ShowMenu(menu, frame, anchor)
-	local maxH = math.max(140, Gui.AbsoluteSize.Y / MX.Scale - 120)
-	menu.SizeConstraint.MaxSize = Vector2.new(1e6, maxH)
+	local s = math.max(MX.Scale, 0.01)
+	menu.MaxH = math.max(120, math.floor(Gui.AbsoluteSize.Y / s - 70))
+	menu:_Fit()
+	menu.Scroll.CanvasPosition = Vector2.zero
 	MX:ShowPopup(frame, anchor, { AlignRight = true })
 end
 
@@ -2767,7 +2671,7 @@ function Container:AddNumberInput(o)
 			if obj.Locked then return end
 			local held = true
 			local conn
-			conn = UIS.InputEnded:Connect(function(e)
+			conn = Conn(UIS.InputEnded, function(e)
 				if e == i or e.UserInputType == Enum.UserInputType.MouseButton1 then
 					held = false
 					conn:Disconnect()
@@ -2777,8 +2681,8 @@ function Container:AddNumberInput(o)
 				local step = function() obj:Set(obj.Value + dir * inc * (UIS:IsKeyDown(Enum.KeyCode.LeftShift) and 10 or 1)) end
 				step()
 				local t0 = os.clock()
-				while held and os.clock() - t0 < 0.4 do task.wait() end
-				while held do
+				while held and not MX.Dead and os.clock() - t0 < 0.4 do task.wait() end
+				while held and not MX.Dead do
 					step()
 					task.wait(0.06)
 				end
@@ -3112,7 +3016,7 @@ function Container:AddKeybind(o)
 			end
 			MX:_KeyListRefresh()
 		end, function() return obj.State end)
-	elseif o.Default then
+	elseif o.Default and not table.find(MenuKeys, o.Default) then
 		MX:SetMenuKey(o.Default)
 	end
 	function obj:Get() return self.Key end
@@ -3248,11 +3152,11 @@ function Container:AddConfigManager(o)
 		self:AddLabel("Config saving is not supported by your executor.")
 		return nil
 	end
-	local sel, nameText
+	local sel
 	local drop
 	local function list() return MX:ListConfigs() end
 	drop = self:AddDropdown({ Title = "Config", Values = list(), Placeholder = "Select config", Flag = "_cfg_list", Callback = function(v) sel = v end })
-	local tb = self:AddTextbox({ Title = "Name", Placeholder = "New config name", Flag = "_cfg_name", Callback = function(t) nameText = t end })
+	local tb = self:AddTextbox({ Title = "Name", Placeholder = "New config name", Flag = "_cfg_name" })
 	local function refresh()
 		drop:Refresh(list())
 		if sel and table.find(drop.Values, sel) then drop:Set(sel, true) else sel = nil end
@@ -3285,7 +3189,13 @@ function Container:AddConfigManager(o)
 		sel = nil
 		refresh()
 	end })
-	self:AddToggle({ Title = "Autoload Selected", Description = "Loads it with MX:LoadAutoConfig()", Style = "Switch", Flag = "_cfg_auto", Default = MX:GetAutoLoad() ~= nil, Callback = function(v)
+	local auto
+	auto = self:AddToggle({ Title = "Autoload Selected", Description = "Loads it with MX:LoadAutoConfig()", Style = "Switch", Flag = "_cfg_auto", Default = MX:GetAutoLoad() ~= nil, Callback = function(v)
+		if v and not sel then
+			MX:Notify({ Type = "Warning", Title = "Config", Content = "Select a config first.", Duration = 2 })
+			auto:Set(false, true)
+			return
+		end
 		MX:SetAutoLoad(v and sel or nil)
 	end })
 	self:AddButton({ Title = "Refresh", Callback = function() refresh() end })
@@ -3312,11 +3222,11 @@ local function NewSection(parent, base, o)
 	local title = tostring(o.Title or o.Name or "")
 	local headless = o.NoHeader or title == ""
 	local card = Box(parent, { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY, LayoutOrder = base.order or 0, ClipsDescendants = true }, "Card", 8, "Border")
-	GlassOn(card, 0.35)
+	GlassOn(card, 0.3)
 	List(card, 0)
 	local sec = setmetatable({ Frame = card, Win = base.Win, Owner = base.Owner, NoIndex = base.NoIndex, SecTitle = title, Up = base.Up, Collapsed = false, ToggleValue = o.Default and true or false }, SectionMT)
 	sec.SecObj = sec
-	sec.Reveal = function() if sec.Collapsed then sec:SetCollapsed(true == false) end end
+	sec.Reveal = function() if sec.Collapsed then sec:SetCollapsed(false) end end
 	local HH = Touch and 38 or 32
 	local header = New("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, headless and 6 or HH), LayoutOrder = 0 }, card)
 	local body = New("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY, LayoutOrder = 1 }, card)
@@ -3348,7 +3258,7 @@ local function NewSection(parent, base, o)
 			local sh = Hit(swTrack, 5)
 			sh.Activated:Connect(function() sec:SetToggle(not sec.ToggleValue) end)
 		end
-		local line = Box(header, { Size = UDim2.new(1, -20, 0, 1), Position = UDim2.new(0, 10, 1, -1), BackgroundTransparency = 0.5 }, "Border")
+		Box(header, { Size = UDim2.new(1, -20, 0, 1), Position = UDim2.new(0, 10, 1, -1), BackgroundTransparency = 0.5 }, "Border")
 	end
 	local dim
 	if o.Toggle and o.Dim then
@@ -3479,8 +3389,7 @@ function Page:Reflow()
 		else
 			if not band then newBand(false) end
 			local target
-			if cols == 1 then target = L
-			elseif it.side == "Left" then target = L
+			if cols == 1 or it.side == "Left" then target = L
 			elseif it.side == "Right" then target = R
 			else
 				target = left and L or R
@@ -3681,8 +3590,9 @@ function Window:_Fit()
 end
 
 function Window:SetScale(s)
-	MX.UserScale = math.clamp(s, 0.5, 1.6)
+	MX.UserScale = math.clamp(tonumber(s) or 1, 0.5, 1.6)
 	self:_Fit()
+	SyncOpt("ui_scale", MX.UserScale)
 end
 function Window:SetSidebar(v)
 	self.Collapsed = v and true or false
@@ -3709,7 +3619,7 @@ function Window:Toggle(state)
 		end)
 	end
 	self:_UpdateMobileBtn()
-	MX:_UpdateBlur()
+	self:_FxRefresh()
 end
 function Window:Show() self:Toggle(true) end
 function Window:Hide() self:Toggle(false) end
@@ -3719,7 +3629,10 @@ function Window:FocusSearch() if self.SearchBox then self.SearchBox:CaptureFocus
 
 function Window:Dialog(o)
 	o = o or {}
+	if MX.Dead then return end
+	if self._dialog and self._dialog.Parent then self._dialog:Destroy() end
 	local dim = New("TextButton", { AutoButtonColor = false, Text = "", BackgroundColor3 = C3(0, 0, 0), BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 60, BorderSizePixel = 0 }, self.Main)
+	self._dialog = dim
 	New("UICorner", { CornerRadius = UDim.new(0, 10) }, dim)
 	Tween(dim, { BackgroundTransparency = 0.45 }, 0.15)
 	local card = Box(dim, { Size = UDim2.new(0, math.min(340, (self.W or 400) - 40), 0, 0), AutomaticSize = AY, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), ZIndex = 61 }, "Card", 10, "Border")
@@ -3746,28 +3659,235 @@ function Window:Dialog(o)
 end
 function MX:Dialog(o) if MX.Window then MX.Window:Dialog(o) end end
 
-function Window:_Star()
-	local host = self.PageHost
-	local sz = host.AbsoluteSize / MX.Scale
-	local s = New("Frame", { BackgroundColor3 = Theme.Accent, BorderSizePixel = 0, Size = UDim2.fromOffset(60, 2), Rotation = 25, ZIndex = 0, Position = UDim2.fromOffset(math.random(0, math.max(1, math.floor(sz.X))), -10) }, host)
-	New("UIGradient", { Transparency = NumberSequence.new(1, 0) }, s)
-	local p = s.Position
-	Tween(s, { Position = UDim2.fromOffset(p.X.Offset + 220, p.Y.Offset + 110) }, 1.2, Enum.EasingStyle.Linear)
-	task.delay(1.25, function() s:Destroy() end)
-end
-function Window:SetStars(v)
-	self.Stars = v and true or false
-	if self.Stars and not self._starLoop then
-		self._starLoop = task.spawn(function()
-			while self.Stars and not MX.Dead and self.Main.Parent do
-				if self.Open and self.Selected then self:_Star() end
-				task.wait(math.random(15, 45) / 10)
-			end
-			self._starLoop = nil
-		end)
+MX.EffectOrder = { "Stars", "Snow", "Rain", "Fire" }
+MX.EffectIntensity = 0.6
+local EffectDefs = {}
+MX.EffectDefs = EffectDefs
+local function Rnd(a, b) return a + math.random() * (b - a) end
+local RAIN_ANGLE = math.rad(12)
+local STAR_ANGLE = math.rad(26)
+
+EffectDefs.Stars = {
+	Flag = "stars", Title = "Shooting Stars", Max = 3, Rate = 0.45,
+	Make = function(layer)
+		local f = New("Frame", { BorderSizePixel = 0, Size = UDim2.fromOffset(70, 2), Rotation = math.deg(STAR_ANGLE), AnchorPoint = Vector2.new(1, 0.5), Visible = false }, layer)
+		New("UIGradient", { Transparency = NumberSequence.new(1, 0) }, f)
+		return f
+	end,
+	Color = function(f) f.BackgroundColor3 = Theme.Accent end,
+	Spawn = function(p, w, h)
+		p.x, p.y = Rnd(0, w * 0.75), Rnd(-10, h * 0.3)
+		local sp = Rnd(200, 300)
+		p.vx, p.vy = sp * math.cos(STAR_ANGLE), sp * math.sin(STAR_ANGLE)
+		p.life = Rnd(0.9, 1.4)
+	end,
+	Step = function(p, dt)
+		p.x += p.vx * dt
+		p.y += p.vy * dt
+		local t = p.age / p.life
+		p.f.BackgroundTransparency = t < 0.15 and (1 - t / 0.15) or (t > 0.7 and (t - 0.7) / 0.3 or 0)
+	end,
+}
+
+EffectDefs.Snow = {
+	Flag = "fx_snow", Title = "Snow", Max = 60, Rate = 16,
+	Make = function(layer)
+		local f = New("Frame", { BorderSizePixel = 0, AnchorPoint = Vector2.new(0.5, 0.5), Visible = false }, layer)
+		New("UICorner", { CornerRadius = UDim.new(1, 0) }, f)
+		return f
+	end,
+	Color = function(f) f.BackgroundColor3 = Theme.Text end,
+	Spawn = function(p, w)
+		local s = math.random(2, 5)
+		p.f.Size = UDim2.fromOffset(s, s)
+		p.f.BackgroundTransparency = Rnd(0.15, 0.55)
+		p.x0, p.y = Rnd(0, w), -6
+		p.x = p.x0
+		p.vy = Rnd(22, 55) * (0.7 + s * 0.1)
+		p.amp, p.fq, p.ph, p.drift = Rnd(6, 18), Rnd(0.6, 1.4), Rnd(0, 6.28), Rnd(-6, 6)
+		p.life = nil
+	end,
+	Step = function(p, dt, _, h)
+		p.y += p.vy * dt
+		p.x = p.x0 + math.sin(p.age * p.fq + p.ph) * p.amp + p.drift * p.age
+		return p.y < h + 8
+	end,
+}
+
+EffectDefs.Rain = {
+	Flag = "fx_rain", Title = "Rain", Max = 70, Rate = 60,
+	Make = function(layer)
+		return New("Frame", { BorderSizePixel = 0, AnchorPoint = Vector2.new(0.5, 0.5), Rotation = math.deg(RAIN_ANGLE), Visible = false }, layer)
+	end,
+	Color = function(f) f.BackgroundColor3 = Theme.Sub end,
+	Spawn = function(p, w, h)
+		local len = math.random(10, 18)
+		p.f.Size = UDim2.fromOffset(1, len)
+		p.f.BackgroundTransparency = Rnd(0.35, 0.65)
+		p.vy = Rnd(380, 560)
+		p.vx = -p.vy * math.tan(RAIN_ANGLE)
+		p.x, p.y = Rnd(0, w + h * math.tan(RAIN_ANGLE)), -len
+		p.life = nil
+	end,
+	Step = function(p, dt, _, h)
+		p.x += p.vx * dt
+		p.y += p.vy * dt
+		return p.y < h + 20
+	end,
+}
+
+local FireA, FireB, FireC = C3(255, 214, 110), C3(255, 120, 40), C3(190, 36, 28)
+EffectDefs.Fire = {
+	Flag = "fx_fire", Title = "Fire", Max = 50, Rate = 32,
+	Make = function(layer)
+		local f = New("Frame", { BorderSizePixel = 0, AnchorPoint = Vector2.new(0.5, 0.5), Visible = false }, layer)
+		New("UICorner", { CornerRadius = UDim.new(1, 0) }, f)
+		return f
+	end,
+	Color = function() end,
+	Extra = function(layer)
+		local glow = New("Frame", { BorderSizePixel = 0, AnchorPoint = Vector2.new(0, 1), Position = UDim2.fromScale(0, 1), Size = UDim2.new(1, 0, 0, 70) }, layer)
+		New("UIGradient", { Rotation = 90, Transparency = NumberSequence.new(1, 0.55) }, glow)
+		return glow
+	end,
+	ColorExtra = function(glow) glow.BackgroundColor3 = FireB:Lerp(Theme.Accent, 0.3) end,
+	Spawn = function(p, w, h)
+		p.s = Rnd(3, 7)
+		p.x0, p.y = Rnd(0, w), h + 4
+		p.x = p.x0
+		p.vy = -Rnd(45, 110)
+		p.amp, p.fq, p.ph = Rnd(3, 10), Rnd(1.5, 3), Rnd(0, 6.28)
+		p.life = Rnd(1.2, 2.4)
+	end,
+	Step = function(p, dt)
+		p.y += p.vy * dt
+		p.x = p.x0 + math.sin(p.age * p.fq + p.ph) * p.amp
+		local t = math.clamp(p.age / p.life, 0, 1)
+		local col = t < 0.5 and FireA:Lerp(FireB, t * 2) or FireB:Lerp(FireC, (t - 0.5) * 2)
+		local s = math.max(1, p.s * (1 - 0.55 * t))
+		p.f.BackgroundColor3 = col:Lerp(Theme.Accent, 0.2)
+		p.f.BackgroundTransparency = 0.1 + 0.9 * t
+		p.f.Size = UDim2.fromOffset(s, s)
+	end,
+}
+
+function Window:_FxRefresh()
+	local run = self.Fx ~= nil and next(self.Fx) ~= nil and self.Open and not MX.Dead and self.FxLayer ~= nil and self.FxLayer.Parent ~= nil
+	if self.FxLayer then self.FxLayer.Visible = run and true or false end
+	if run and not self._fxConn then
+		self._fxConn = Conn(RunService.Heartbeat, function(dt) self:_FxStep(dt) end)
+	elseif not run and self._fxConn then
+		self._fxConn:Disconnect()
+		self._fxConn = nil
 	end
 end
-function Window:GetStars() return self.Stars end
+
+function Window:_FxStep(dt)
+	if MX.Dead then return end
+	local layer = self.FxLayer
+	if not layer or not layer.Parent then return end
+	dt = math.min(dt, 0.1)
+	local sz = layer.AbsoluteSize / math.max(MX.Scale, 0.01)
+	local w, h = sz.X, sz.Y
+	if w < 10 or h < 10 then return end
+	local k = MX.EffectIntensity
+	for _, st in pairs(self.Fx) do
+		local def, pool = st.def, st.pool
+		local cap = math.max(1, math.floor(def.Max * k + 0.5))
+		st.acc += dt * def.Rate * k
+		while st.acc >= 1 do
+			st.acc -= 1
+			local p
+			for _, q in ipairs(pool) do
+				if not q.alive then p = q break end
+			end
+			if not p and #pool < cap then
+				p = { f = def.Make(layer) }
+				def.Color(p.f)
+				pool[#pool + 1] = p
+			end
+			if not p then
+				st.acc = 0
+				break
+			end
+			p.alive, p.age = true, 0
+			def.Spawn(p, w, h)
+			p.f.Position = UDim2.fromOffset(p.x, p.y)
+			p.f.Visible = true
+		end
+		for i = #pool, 1, -1 do
+			local p = pool[i]
+			if p.alive then
+				p.age += dt
+				if def.Step(p, dt, w, h) == false or (p.life and p.age >= p.life) then
+					p.alive = false
+					p.f.Visible = false
+				else
+					p.f.Position = UDim2.fromOffset(p.x, p.y)
+				end
+			end
+			if not p.alive and i > cap then
+				p.f:Destroy()
+				table.remove(pool, i)
+			end
+		end
+	end
+end
+
+function Window:_FxClear(name)
+	local st = self.Fx[name]
+	if not st then return end
+	for _, p in ipairs(st.pool) do p.f:Destroy() end
+	if st.extra then st.extra:Destroy() end
+	self.Fx[name] = nil
+end
+
+function Window:SetEffect(name, on)
+	local def = EffectDefs[name]
+	if not def or not self.FxLayer then return end
+	on = on and not MX.Dead and true or false
+	if on and not self.Fx[name] then
+		local st = { def = def, pool = {}, acc = 0.99 }
+		if def.Extra then
+			st.extra = def.Extra(self.FxLayer)
+			if def.ColorExtra then def.ColorExtra(st.extra) end
+		end
+		self.Fx[name] = st
+	elseif not on then
+		self:_FxClear(name)
+	end
+	if name == "Stars" then self.Stars = on end
+	SyncOpt(def.Flag, on)
+	self:_FxRefresh()
+end
+function Window:GetEffect(name) return self.Fx ~= nil and self.Fx[name] ~= nil end
+function Window:ToggleEffect(name) self:SetEffect(name, not self:GetEffect(name)) end
+function Window:SetStars(v) self:SetEffect("Stars", v) end
+function Window:GetStars() return self:GetEffect("Stars") end
+
+function MX:SetEffectIntensity(v)
+	v = tonumber(v) or 60
+	if v > 1 then v = v / 100 end
+	MX.EffectIntensity = math.clamp(v, 0.25, 1)
+	SyncOpt("fx_intensity", math.floor(MX.EffectIntensity * 100 + 0.5))
+end
+function MX:SetEffect(name, on) if MX.Window then MX.Window:SetEffect(name, on) end end
+
+function Window:_FxInit(content)
+	self.Fx = {}
+	local layer = New("Frame", { Name = "Effects", BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.fromScale(1, 1), ClipsDescendants = true, ZIndex = 1, Visible = false }, content)
+	self.FxLayer = layer
+	self._fxStop = function()
+		if self._fxConn then self._fxConn:Disconnect() self._fxConn = nil end
+		for name in pairs(self.Fx) do self:_FxClear(name) end
+	end
+	Watch(layer, function()
+		for _, st in pairs(self.Fx) do
+			for _, p in ipairs(st.pool) do st.def.Color(p.f) end
+			if st.extra and st.def.ColorExtra then st.def.ColorExtra(st.extra) end
+		end
+	end)
+end
 
 function Window:_Goto(e)
 	local c = e.cont
@@ -3842,26 +3962,33 @@ function MX:CreateWindow(o)
 	win.HH = Touch and 42 or 38
 	if o.Theme and MX.Themes[o.Theme] then MX:SetTheme(o.Theme, true) end
 	if o.Glass then MX:SetGlass(true) end
-	if o.GlassBlur then MX:SetGlassBlur(true) end
 	if o.ToggleKeys then MX:_SetMenuKeys(o.ToggleKeys) elseif o.ToggleKey then MX:_SetMenuKeys({ Enum.KeyCode.Insert, o.ToggleKey }) end
 
 	local main = Box(WinLayer, { Name = "Main", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, TopInset() / 2), Size = UDim2.fromOffset(win.BaseW, win.BaseH), ClipsDescendants = true }, "Window", 10, "Border")
-	GlassOn(main, 0.15)
+	GlassOn(main, 0.2)
 	win.Main = main
+	do
+		local sheen = New("UIGradient", { Rotation = 90, Enabled = MX.Glass, Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 0.35) }) }, main)
+		table.insert(GlassHooks, function(on)
+			if not sheen.Parent then return false end
+			sheen.Enabled = on
+			return true
+		end)
+	end
 	win.ScaleObj = Scaled(main)
 	local HH = win.HH
 
 	local header = Box(main, { Size = UDim2.new(1, 0, 0, HH), ZIndex = 3 }, "Panel", 10)
-	GlassOn(header, 0.2)
+	GlassOn(header, 1)
 	local hfill = Box(header, { Size = UDim2.new(1, 0, 0, 12), Position = UDim2.new(0, 0, 1, -12) }, "Panel")
-	GlassOn(hfill, 0.2)
+	GlassOn(hfill, 1)
 	local hline = Box(header, { Size = UDim2.new(1, 0, 0, 1), Position = UDim2.new(0, 0, 1, -1) }, "Border")
 	hline.BackgroundTransparency = 0.5
 	local hl = New("Frame", { BackgroundTransparency = 1, Size = UDim2.new(0, 0, 1, 0), AutomaticSize = AX, Position = UDim2.new(0, 8, 0, 0), ZIndex = 4 }, header)
 	List(hl, 8, Enum.FillDirection.Horizontal, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
 	local bsz = Touch and 32 or 28
 	if o.Collapsible ~= false then
-		local cb, ch = PaletteButton(hl, "menu", 1, bsz)
+		local _, ch = PaletteButton(hl, "menu", 1, bsz)
 		ch.Activated:Connect(function() win:ToggleSidebar() end)
 	end
 	local logo = MXLogo(hl, 24)
@@ -3923,7 +4050,6 @@ function MX:CreateWindow(o)
 		end)
 	end
 
-	local gearMenu, gearFrame, gearRefs
 	local lb, lh, lic = PaletteButton(hr, "unlock", 3, bsz, false)
 	local function paintLock()
 		local id = MX:GetIcon(MX.Locked and "lock" or "unlock")
@@ -3942,39 +4068,20 @@ function MX:CreateWindow(o)
 		MX:SetLocked(not MX.Locked)
 	end)
 	local gb, gh = PaletteButton(hr, "settings", 4, bsz)
+	win.QuickButton = gb
+	MX:Tip(gh, "Quick Settings")
 	gh.Activated:Connect(function()
-		if not gearMenu then
-			gearRefs = {}
-			gearMenu, gearFrame = MakeMenu("Quick Settings", 240)
-			gearRefs.glass = gearMenu:AddToggle({ Title = "Glass", Style = "Switch", Callback = function(v) MX:SetGlass(v) end })
-			gearRefs.blur = gearMenu:AddToggle({ Title = "Screen Blur", Description = "Blurs the game while Glass is on", Style = "Switch", Callback = function(v) MX:SetGlassBlur(v) end })
-			gearRefs.wm = gearMenu:AddToggle({ Title = "Watermark", Style = "Switch", Callback = function(v) if MX.Watermark then MX.Watermark:SetVisible(v) end end })
-			gearRefs.kl = gearMenu:AddToggle({ Title = "Keybind List", Style = "Switch", Callback = function(v) if MX.KeyList then MX.KeyList:SetVisible(v) end end })
-			gearRefs.stars = gearMenu:AddToggle({ Title = "Shooting Stars", Style = "Switch", Callback = function(v) win:SetStars(v) end })
-			gearRefs.scale = gearMenu:AddSlider({ Title = "UI Scale", Min = 0.6, Max = 1.4, Increment = 0.05, Default = MX.UserScale, Callback = function(v) win:SetScale(v) end })
-			gearRefs.mob = gearMenu:AddToggle({ Title = "Mobile Button", Style = "Switch", Callback = function(v) win:SetMobileButton(v) end })
-			gearRefs.lock = gearMenu:AddToggle({ Title = "Lock UI", Description = "Stops windows and buttons from being moved", Style = "Switch", Callback = function(v) MX:SetLocked(v) end })
-			if MX.Discord then
-				gearMenu:AddButton({ Title = "Copy Discord Invite", Callback = function() Copy(MX.Discord) MX:Notify({ Type = "Success", Title = "Copied", Content = MX.Discord, Duration = 2 }) end })
-			end
-		end
-		gearRefs.glass:Set(MX.Glass, true)
-		gearRefs.blur:Set(MX.GlassBlur, true)
-		gearRefs.wm:Set(MX.Watermark and MX.Watermark.Visible or false, true)
-		gearRefs.kl:Set(MX.KeyList and MX.KeyList.Visible or false, true)
-		gearRefs.stars:Set(win.Stars and true or false, true)
-		gearRefs.scale:Set(MX.UserScale, true)
-		gearRefs.mob:Set(win.MobileBtn ~= nil, true)
-		gearRefs.lock:Set(MX.Locked, true)
-		ShowMenu(gearMenu, gearFrame, gb)
+		if MX.Dead then return end
+		if not win.QuickMenu then win:_BuildQuickSettings() end
+		win:_SyncQuickSettings()
+		ShowMenu(win.QuickMenu, win.QuickFrame, gb)
 	end)
 
-	local mb, mh = PaletteButton(hr, "minus", 5, bsz)
+	local _, mh = PaletteButton(hr, "minus", 5, bsz)
 	mh.Activated:Connect(function() win:Toggle(false) end)
-	local xb, xh = PaletteButton(hr, "x", 6, bsz)
-	xh.Activated:Connect(function()
-		win:Dialog({ Title = "Unload MX?", Content = "The UI closes completely. Run the script again to bring it back.", Buttons = { { Title = "Unload", Primary = true, Callback = function() MX:Destroy() end }, { Title = "Stay" } } })
-	end)
+	local _, xh = PaletteButton(hr, "x", 6, bsz)
+	MX:Tip(xh, "Unload Script")
+	xh.Activated:Connect(function() win:ConfirmUnload() end)
 
 	local startPos
 	Drag(header, {
@@ -3992,8 +4099,8 @@ function MX:CreateWindow(o)
 	})
 
 	local sidebar = Box(main, { Position = UDim2.new(0, 0, 0, HH), Size = UDim2.new(0, win.TabWidth, 1, -HH), ClipsDescendants = true }, "Side")
-	GlassOn(sidebar, 0.3)
-	RoundBox(sidebar, "Side", 0.3, "left")
+	GlassOn(sidebar, 1)
+	RoundBox(sidebar, "Side", 1, "left")
 	Box(sidebar, { Size = UDim2.new(0, 1, 1, 0), AnchorPoint = Vector2.new(1, 0), Position = UDim2.fromScale(1, 0), BackgroundTransparency = 0.5, ZIndex = 2 }, "Border")
 	win.Sidebar = sidebar
 	local profileH = o.Profile ~= false and 52 or 0
@@ -4004,7 +4111,8 @@ function MX:CreateWindow(o)
 	table.insert(win.Pages, sl)
 	if profileH > 0 then
 		local pf = Box(sidebar, { Size = UDim2.new(1, 0, 0, profileH), AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 0, 1, 0) }, "Panel")
-		GlassOn(pf, 0.4)
+		GlassOn(pf, 1)
+		RoundBox(pf, "Panel", 1, "left")
 		Box(pf, { Size = UDim2.new(1, -16, 0, 1), Position = UDim2.new(0, 8, 0, 0), BackgroundTransparency = 0.5 }, "Border")
 		local av = New("ImageLabel", { Size = UDim2.fromOffset(32, 32), Position = UDim2.new(0, 12, 0.5, -16), BackgroundTransparency = 0, BorderSizePixel = 0, Image = "" }, pf)
 		Bind(av, { BackgroundColor3 = "Element" })
@@ -4021,10 +4129,11 @@ function MX:CreateWindow(o)
 	end
 
 	local content = Box(main, { Position = UDim2.new(0, win.TabWidth, 0, HH), Size = UDim2.new(1, -win.TabWidth, 1, -HH), ClipsDescendants = true }, "Panel")
-	GlassOn(content, 0.25)
-	RoundBox(content, "Panel", 0.25, "right")
+	GlassOn(content, 1)
+	RoundBox(content, "Panel", 1, "right")
 	win.Content = content
-	win.PageHost = New("Frame", { BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ClipsDescendants = true }, content)
+	win:_FxInit(content)
+	win.PageHost = New("Frame", { BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ClipsDescendants = true, ZIndex = 2 }, content)
 
 	if o.Resizable ~= false then
 		local grip = New("TextButton", { Text = "◢", AutoButtonColor = false, BackgroundTransparency = 1, Size = UDim2.fromOffset(Touch and 28 or 20, Touch and 28 or 20), AnchorPoint = Vector2.new(1, 1), Position = UDim2.fromScale(1, 1), Font = FONT.Bold, TextSize = 11, ZIndex = 5 }, main)
@@ -4056,13 +4165,18 @@ function MX:CreateWindow(o)
 			win:_Fit()
 		end
 	end)
+	if o.EffectIntensity then MX:SetEffectIntensity(o.EffectIntensity) end
 	win:SetStars(o.Stars == nil and not Touch or o.Stars == true)
+	if type(o.Effects) == "table" then
+		for name, on in pairs(o.Effects) do win:SetEffect(name, on) end
+	end
 
 	local mbOpt = o.MobileButton
 	if mbOpt == nil then mbOpt = "Auto" end
 	if mbOpt == true or type(mbOpt) == "table" or (mbOpt == "Auto" and Touch) then
 		win:SetMobileButton(true, type(mbOpt) == "table" and mbOpt or nil)
 	end
+	win:_BuildQuickSettings()
 	return win
 end
 
@@ -4080,7 +4194,8 @@ function Window:SetMobileButton(on, opts)
 		for _, c in ipairs(self._mbConns) do c:Disconnect() end
 		self._mbConns = nil
 	end
-	if not on then return end
+	SyncOpt("mobile_button", on and true or false)
+	if not on or MX.Dead then return end
 	opts = opts or self.MobileOpts or {}
 	self.MobileOpts = opts
 	local size = opts.Size or 46
@@ -4140,12 +4255,51 @@ function Window:SetMobileButton(on, opts)
 	self:_UpdateMobileBtn()
 end
 
+local InternalFlags = { glass = true, watermark = true, keybind_list = true, mobile_button = true, ui_scale = true, ui_locked = true, menu_key = true, theme = true, themefade = true, stars = true }
+MX.UnloadCallbacks = {}
+MX.UnloadResetsToggles = true
+function MX:OnUnload(fn)
+	if type(fn) == "function" then table.insert(MX.UnloadCallbacks, fn) end
+end
+
 function MX:Destroy()
 	if MX.Dead then return end
+	if MX.UnloadResetsToggles then
+		for flag, obj in pairs(MX.Options) do
+			if type(obj) == "table" and not InternalFlags[flag] and flag:sub(1, 3) ~= "fx_" and flag:sub(1, 1) ~= "_" then
+				if obj.Type == "Toggle" and obj.Value == true then
+					pcall(obj.Set, obj, false)
+				elseif obj.Type == "Slider" and obj.ToggleValue == true then
+					pcall(obj.SetToggle, obj, false)
+				end
+			end
+		end
+	end
+	for _, fn in ipairs(MX.UnloadCallbacks) do
+		local ok, err = pcall(fn)
+		if not ok then warn("[MX] OnUnload: " .. tostring(err)) end
+	end
+	pcall(function() MX:CloseAllPopups() end)
 	MX.Dead = true
+	MX.Listening = false
+	if MX._listenConn then pcall(function() MX._listenConn:Disconnect() end) MX._listenConn = nil end
+	for _, w in ipairs(MX.Windows) do
+		w.Open = false
+		w.Stars = false
+		if w._fxStop then pcall(w._fxStop) end
+	end
+	if MX.Watermark then MX.Watermark.Dead = true end
 	for _, c in ipairs(Conns) do pcall(function() c:Disconnect() end) end
-	if Blur then Blur:Destroy() Blur = nil end
-	if Gui then Gui:Destroy() end
+	table.clear(Conns)
+	table.clear(MX.Binds)
+	table.clear(MX.ThemeListeners)
+	table.clear(MX.LockListeners)
+	table.clear(MX.ConfigListeners)
+	table.clear(GlassHooks)
+	table.clear(GlassReg)
+	table.clear(Reg)
+	if Gui then pcall(function() Gui:Destroy() end) end
+	MX.Watermark, MX.KeyList, MX.Window = nil, nil, nil
 	if genv.MXUI == MX then genv.MXUI = nil end
 end
 
@@ -4160,7 +4314,8 @@ local Corners = {
 local function Place(frame, corner, margin)
 	local c = Corners[corner] or Corners.TopRight
 	frame.AnchorPoint = c[1]
-	frame.Position = UDim2.new(c[2], c[4] * margin, c[3], c[5] * margin)
+	local top = c[3] == 0 and TopInset() or 0
+	frame.Position = UDim2.new(c[2], c[4] * margin, c[3], c[5] * margin + top)
 end
 
 function MX:CreateWatermark(o)
@@ -4242,12 +4397,22 @@ function MX:CreateWatermark(o)
 	end
 	function wm:SetTitle(t) if titleLbl then titleLbl.Text = tostring(t) end end
 	function wm:SetPosition(c) Place(frame, c, o.Margin or 10) end
-	function wm:SetVisible(v) self.Visible = v and true or false frame.Visible = self.Visible end
+	function wm:SetVisible(v)
+		self.Visible = v and true or false
+		frame.Visible = self.Visible
+		if self.Visible then
+			for _, it in ipairs(self.Items) do it:Update() end
+		end
+		if MX.Watermark == self then SyncOpt("watermark", self.Visible) end
+	end
 	function wm:Toggle() self:SetVisible(not self.Visible) end
 	function wm:Destroy()
 		self.Dead = true
 		frame:Destroy()
-		if MX.Watermark == self then MX.Watermark = nil end
+		if MX.Watermark == self then
+			MX.Watermark = nil
+			SyncOpt("watermark", false)
+		end
 	end
 	if o.Items then
 		for _, it in ipairs(o.Items) do wm:Add(it[1], it[2]) end
@@ -4264,8 +4429,25 @@ function MX:CreateWatermark(o)
 		end
 	end)
 	MX.Watermark = wm
+	SyncOpt("watermark", wm.Visible)
 	return wm
 end
+
+function MX:SetWatermark(v)
+	v = v and true or false
+	if MX.Dead then return end
+	if v and not MX.Watermark then MX:CreateWatermark({ Visible = true }) end
+	if MX.Watermark then MX.Watermark:SetVisible(v) else SyncOpt("watermark", false) end
+end
+function MX:GetWatermark() return MX.Watermark ~= nil and MX.Watermark.Visible end
+
+function MX:SetKeybindList(v)
+	v = v and true or false
+	if MX.Dead then return end
+	if v and not MX.KeyList then MX:CreateKeybindList({ Visible = true }) end
+	if MX.KeyList then MX.KeyList:SetVisible(v) else SyncOpt("keybind_list", false) end
+end
+function MX:GetKeybindList() return MX.KeyList ~= nil and MX.KeyList.Visible end
 
 function MX:CreateKeybindList(o)
 	o = o or {}
@@ -4304,7 +4486,7 @@ function MX:CreateKeybindList(o)
 			end
 		end
 		self.Count = #parts
-		frame.Visible = self.Visible and #parts > 0
+		frame.Visible = self.Visible
 		local sig = table.concat(parts, ";") .. tostring(self.OnlyActive) .. MX.ThemeName
 		if sig == self._sig then return end
 		self._sig = sig
@@ -4329,23 +4511,32 @@ function MX:CreateKeybindList(o)
 				end
 			end
 		end
+		if n == 0 then
+			Lbl(frame, { Text = #parts == 0 and "No keybinds yet" or "No active keybinds", Size = UDim2.new(1, 0, 0, 20), TextSize = 12, Font = FONT.Reg, LayoutOrder = 1 }, "Sub")
+		end
 	end
 	function kl:SetKey(k) self.Key = k end
 	function kl:SetVisible(v)
 		self.Visible = v and true or false
-		frame.Visible = self.Visible and (self.Count or 0) > 0
+		frame.Visible = self.Visible
+		if self.Visible then self:Refresh() end
+		if MX.KeyList == self then SyncOpt("keybind_list", self.Visible) end
 	end
 	function kl:Toggle() self:SetVisible(not self.Visible) end
 	function kl:Destroy()
 		self._c:Disconnect()
 		frame:Destroy()
-		if MX.KeyList == self then MX.KeyList = nil end
+		if MX.KeyList == self then
+			MX.KeyList = nil
+			SyncOpt("keybind_list", false)
+		end
 	end
 	kl._c = Conn(UIS.InputBegan, function(i)
 		if i.KeyCode == kl.Key and not UIS:GetFocusedTextBox() and not MX.Listening then kl:Toggle() end
 	end)
 	MX.KeyList = kl
 	kl:Refresh()
+	SyncOpt("keybind_list", kl.Visible)
 	task.spawn(function()
 		while not MX.Dead and kl._c.Connected do
 			if kl.Visible then kl:Refresh() end
@@ -4392,13 +4583,15 @@ function MX:AddWindow(o)
 	local minW, minH = w, h
 	local maxW, maxH = o.MaxWidth or math.max(w * 2.2, 560), o.MaxHeight or math.max(h * 2.6, 460)
 	local f = Box(FloatLayer, { Size = UDim2.fromOffset(w, h), ClipsDescendants = true, ZIndex = WinN }, "Window", 8, "Border")
+	GlassOn(f, 0.2)
 	Scaled(f)
 	f.AnchorPoint = Vector2.new(0.5, 0.5)
 	if typeof(o.Position) == "UDim2" then f.Position = o.Position
 	elseif typeof(o.Position) == "Vector2" then f.Position = UDim2.fromOffset(o.Position.X, o.Position.Y)
 	else f.Position = UDim2.new(0.5, 24 * (WinN % 8), 0.5, 24 * (WinN % 8)) end
 	local head = Box(f, { Size = UDim2.new(1, 0, 0, 30), ZIndex = 3 }, "Panel", 8)
-	Box(head, { Size = UDim2.new(1, 0, 0, 8), Position = UDim2.new(0, 0, 1, -8) }, "Panel")
+	GlassOn(head, 1)
+	GlassOn(Box(head, { Size = UDim2.new(1, 0, 0, 8), Position = UDim2.new(0, 0, 1, -8) }, "Panel"), 1)
 	local hl = New("Frame", { BackgroundTransparency = 1, Position = UDim2.new(0, 8, 0, 0), Size = UDim2.new(1, -40, 1, 0) }, head)
 	List(hl, 6, Enum.FillDirection.Horizontal, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
 	if o.Icon then
@@ -4550,13 +4743,14 @@ function MX:AddWindow(o)
 	end
 	function H:SetSize(a, b)
 		if typeof(a) == "Vector2" then a, b = a.X, a.Y end
-		b = b or h
-		w, h = math.clamp(a, minW, maxW), math.clamp(b, minH, maxH)
+		a, b = tonumber(a) or w, tonumber(b) or h
+		w, h = math.clamp(a, minW, math.max(minW, maxW)), math.clamp(b, minH, math.max(minH, maxH))
 		f.Size = UDim2.fromOffset(w, h)
 	end
 	function H:GetSize() return Vector2.new(w, h) end
 	function H:SetLimits(mn, mx)
-		minW, minH, maxW, maxH = mn.X, mn.Y, mx.X, mx.Y
+		if typeof(mn) == "Vector2" then minW, minH = mn.X, mn.Y end
+		if typeof(mx) == "Vector2" then maxW, maxH = mx.X, mx.Y end
 	end
 	function H:SetPosition(p)
 		if typeof(p) == "Vector2" then p = UDim2.fromOffset(p.X, p.Y) end
@@ -4600,26 +4794,87 @@ function MX:AddWindow(o)
 end
 function Window:AddWindow(o) return MX:AddWindow(o) end
 
+function Window:_BuildQuickSettings()
+	if self.QuickMenu then return self.QuickMenu end
+	local win = self
+	local q, frame = MakeMenu("Quick Settings", 260)
+	self.QuickMenu, self.QuickFrame = q, frame
+	local refs = {}
+	self._quickRefs = refs
+	refs.glass = q:AddToggle({ Title = "Glass", Description = "Translucent window and panels", Flag = "glass", Style = "Switch", Default = MX.Glass, Callback = function(v) MX:SetGlass(v) end })
+	refs.wm = q:AddToggle({ Title = "Watermark", Description = "FPS / ping overlay, drag to move", Flag = "watermark", Style = "Switch", Default = MX:GetWatermark(), Callback = function(v) MX:SetWatermark(v) end })
+	refs.kl = q:AddToggle({ Title = "Keybind List", Flag = "keybind_list", Style = "Switch", Default = MX:GetKeybindList(), Callback = function(v) MX:SetKeybindList(v) end })
+	refs.mob = q:AddToggle({ Title = "Mobile Button", Description = "Floating button that opens and closes the menu", Flag = "mobile_button", Style = "Switch", Default = win.MobileBtn ~= nil, Callback = function(v) win:SetMobileButton(v) end })
+	refs.scale = q:AddSlider({ Title = "UI Scale", Flag = "ui_scale", Min = 0.6, Max = 1.4, Increment = 0.05, Default = MX.UserScale, Callback = function(v) win:SetScale(v) end })
+	refs.lock = q:AddToggle({ Title = "Lock UI", Description = "Stops windows and buttons from being moved", Flag = "ui_locked", Style = "Switch", Default = MX.Locked, Callback = function(v) MX:SetLocked(v) end })
+	local mk
+	for i = #MenuKeys, 1, -1 do
+		if MenuKeys[i] ~= Enum.KeyCode.Insert then mk = MenuKeys[i] break end
+	end
+	q:AddKeybind({ Title = "Menu Key", Description = "INSERT always works too", Flag = "menu_key", Default = mk, MenuKey = true })
+	if FS.ok() then
+		local cfgBtn
+		cfgBtn = q:AddButton({ Title = "Configs", Description = "Create, load, save and auto-load", Callback = function() win:OpenConfigs(cfgBtn and cfgBtn.Row or frame) end })
+	end
+	if MX.Discord then
+		q:AddButton({ Title = "Copy Discord Invite", Callback = function()
+			local ok = Copy(MX.Discord)
+			MX:Notify({ Type = ok and "Success" or "Warning", Title = ok and "Copied" or "Not Supported", Content = ok and MX.Discord or "Your executor has no clipboard.", Duration = 2 })
+		end })
+	end
+	q:AddButton({ Title = "Unload Script", Description = "Removes the UI, effects, loops and keybinds", Callback = function() win:ConfirmUnload() end })
+	return q
+end
+
+function Window:_SyncQuickSettings()
+	local r = self._quickRefs
+	if not r then return end
+	r.glass:Set(MX.Glass, true)
+	r.wm:Set(MX:GetWatermark(), true)
+	r.kl:Set(MX:GetKeybindList(), true)
+	r.mob:Set(self.MobileBtn ~= nil, true)
+	r.scale:Set(MX.UserScale, true)
+	r.lock:Set(MX.Locked, true)
+end
+
+function Window:OpenConfigs(anchor)
+	if MX.Dead then return end
+	if not self._cfgMenu then
+		local m, f = MakeMenu("Configs", 280)
+		m:AddConfigManager()
+		self._cfgMenu, self._cfgFrame = m, f
+	end
+	MX:RefreshConfigs()
+	ShowMenu(self._cfgMenu, self._cfgFrame, anchor)
+end
+
+function Window:ConfirmUnload()
+	if MX.Dead then return end
+	MX:CloseAllPopups()
+	if not self.Open then self:Toggle(true) end
+	self:Dialog({ Title = "Unload Script?", Content = "Removes the UI, effects, loops, keybinds and turns your toggles off. Run the script again to bring it back.", Buttons = {
+		{ Title = "Unload", Primary = true, Callback = function() MX:Destroy() end },
+		{ Title = "Cancel" },
+	} })
+end
+
 function Window:AddSettingsTab(o)
 	if self._settingsTab then return self._settingsTab end
 	o = o or {}
-	local tab = self:AddTab({ Title = o.Title or "Settings", Icon = "settings" })
-	local look = tab:AddSection({ Title = "Appearance", Icon = "palette" })
+	local win = self
+	local tab = self:AddTab({ Title = o.Title or "Settings", Icon = o.Icon or "palette" })
+	local look = tab:AddSection({ Title = "Theme", Icon = "palette" })
 	look:AddDropdown({ Title = "Theme", Flag = "theme", Values = MX.ThemeOrder, Default = MX.ThemeName, Callback = function(n) MX:SetTheme(n) end })
-	look:AddToggle({ Title = "Glass", Description = "See-through window on top of any theme", Flag = "glass", Style = "Switch", Default = MX.Glass, Callback = function(v) MX:SetGlass(v) end })
-	look:AddToggle({ Title = "Screen Blur", Description = "Blurs the game behind the menu while Glass is on", Flag = "glass_blur", Style = "Switch", Default = MX.GlassBlur, Callback = function(v) MX:SetGlassBlur(v) end })
-	look:AddSlider({ Title = "UI Scale", Description = "Make everything bigger or smaller", Flag = "ui_scale", Min = 0.6, Max = 1.4, Increment = 0.05, Default = MX.UserScale, Callback = function(v) self:SetScale(v) end })
-	look:AddToggle({ Title = "Theme Fade", Flag = "themefade", Style = "Switch", Default = MX.ThemeSweep, Callback = function(v) MX.ThemeSweep = v end })
-	look:AddToggle({ Title = "Shooting Stars", Flag = "stars", Style = "Switch", Default = self.Stars, Callback = function(v) self:SetStars(v) end })
-	look:AddToggle({ Title = "Watermark", Flag = "watermark", Default = MX.Watermark ~= nil and MX.Watermark.Visible, Callback = function(v) if MX.Watermark then MX.Watermark:SetVisible(v) end end })
-	look:AddToggle({ Title = "Keybind List", Flag = "keybind_list", Default = MX.KeyList ~= nil and MX.KeyList.Visible, Callback = function(v) if MX.KeyList then MX.KeyList:SetVisible(v) end end })
-	look:AddToggle({ Title = "Mobile Button", Description = "Floating button that opens and closes the menu", Flag = "mobile_button", Style = "Switch", Default = self.MobileBtn ~= nil, Callback = function(v) self:SetMobileButton(v) end })
-	look:AddToggle({ Title = "Lock UI", Description = "Stops windows and buttons from being moved", Flag = "ui_locked", Style = "Switch", Default = MX.Locked, Callback = function(v) MX:SetLocked(v) end })
-	look:AddKeybind({ Title = "Menu Key", Description = "Key that shows and hides the window", Flag = "menu_key", Default = Enum.KeyCode.RightShift, MenuKey = true })
-	local cfg = tab:AddSection({ Title = "Configs", Icon = "folder", Side = "Full" })
-	cfg:AddConfigManager()
-	local danger = tab:AddSection({ Title = "Danger Zone", Icon = "alert-triangle", Side = "Full" })
-	danger:AddButton({ Title = "Unload MX", Description = "Removes the UI and every connection", Hold = true, Callback = function() MX:Destroy() end })
+	look:AddToggle({ Title = "Theme Fade", Description = "Animate colours when switching themes", Flag = "themefade", Style = "Switch", Default = MX.ThemeSweep, Callback = function(v) MX.ThemeSweep = v end })
+	look:AddLabel("Glass, watermark, UI scale, keybind list, configs and unload are in Quick Settings (gear icon in the header).")
+	local fx = tab:AddSection({ Title = "Effects", Icon = "wand" })
+	local fxDesc = { Stars = "Occasional streaks in the accent colour", Snow = "Falling snowflakes", Rain = "Light rain behind the menu", Fire = "Rising embers and a warm glow" }
+	for _, name in ipairs(MX.EffectOrder) do
+		local def = EffectDefs[name]
+		fx:AddToggle({ Title = def.Title, Description = fxDesc[name], Flag = def.Flag, Style = "Switch", Default = win:GetEffect(name), Callback = function(v) win:SetEffect(name, v) end })
+	end
+	fx:AddSlider({ Title = "Intensity", Description = "Particle amount for every effect", Flag = "fx_intensity", Min = 25, Max = 100, Increment = 5, Default = math.floor(MX.EffectIntensity * 100 + 0.5), Suffix = "%", Callback = function(v) MX:SetEffectIntensity(v) end })
+	self.EffectsSection = fx
 	self._settingsTab = tab
 	return tab
 end
