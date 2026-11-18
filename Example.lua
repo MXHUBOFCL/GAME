@@ -1,7 +1,25 @@
--- Source URL. To test a branch before it is merged, replace "main" with the branch name,
--- e.g. ".../GAME/fix/settings-themes-effects/Source.lua".
-local SOURCE = "https://raw.githubusercontent.com/MXHUBOFCL/GAME/main/Source.lua"
-local MX = loadstring(game:HttpGet(SOURCE))()
+local BASE = "https://raw.githubusercontent.com/MXHUBOFCL/GAME/"
+local BRANCHES = { "main", "fix/settings-themes-effects" }
+
+local function fetch(url)
+	local ok, body = pcall(game.HttpGet, game, url)
+	if ok and type(body) == "string" and #body > 1000 and body:find("WindowClass", 1, true) then return body end
+	return nil
+end
+
+local MX
+do
+	local src
+	for _, b in ipairs(BRANCHES) do
+		local body = fetch(BASE .. b .. "/Source.lua")
+		if body and body:find("function MX:OnUnload", 1, true) then src = body break end
+		src = src or body
+	end
+	assert(src, "MX UI: could not download Source.lua")
+	local fn, err = loadstring(src)
+	assert(fn, "MX UI: " .. tostring(err))
+	MX = fn()
+end
 
 local C = Color3.fromRGB
 MX:AddThemes({
@@ -35,9 +53,11 @@ MX:CreateKeybindList({ Key = Enum.KeyCode.K, Visible = false })
 
 -- Runs when the user presses "Unload Script" in Quick Settings or the X button.
 -- Toggles are switched off automatically first (set MX.UnloadResetsToggles = false to disable).
-MX:OnUnload(function()
-	print("[MX] unloaded, clean up your own loops/instances here")
-end)
+if MX.OnUnload then
+	MX:OnUnload(function()
+		print("[MX] unloaded")
+	end)
+end
 
 Window:AddCategory("Overview")
 local Home = Window:AddTab("Home", "home")
@@ -116,19 +136,21 @@ States:AddButton({ Title = "Open Info Window", Callback = function()
 		Rows = { { "Place", "{placeid}" }, { "Time", "{time}" } } })
 end })
 
-local FxSec = Visuals:AddSection({ Title = "Effects From Script", Icon = "flame" })
-for _, name in ipairs({ "Stars", "Snow", "Rain", "Fire" }) do
-	FxSec:AddButton({ Title = "Toggle " .. name, Callback = function()
-		Window:ToggleEffect(name)
-		demo(name, Window:GetEffect(name) and "On" or "Off")
+if Window.SetEffect then
+	local FxSec = Visuals:AddSection({ Title = "Effects From Script", Icon = "flame" })
+	for _, name in ipairs({ "Stars", "Snow", "Rain", "Fire" }) do
+		FxSec:AddButton({ Title = "Toggle " .. name, Callback = function()
+			Window:ToggleEffect(name)
+			demo(name, Window:GetEffect(name) and "On" or "Off")
+		end })
+	end
+	FxSec:AddButton({ Title = "Cozy Preset", Description = "Snow + Fire, Frost theme", Callback = function()
+		Window:SetEffect("Rain", false)
+		Window:SetEffect("Snow", true)
+		Window:SetEffect("Fire", true)
+		MX:SetTheme("Frost")
 	end })
 end
-FxSec:AddButton({ Title = "Cozy Preset", Description = "Snow + Fire, Frost theme", Callback = function()
-	Window:SetEffect("Rain", false)
-	Window:SetEffect("Snow", true)
-	Window:SetEffect("Fire", true)
-	MX:SetTheme("Frost")
-end })
 
 local QuickSec = Visuals:AddSection({ Title = "Quick Settings From Script", Icon = "settings" })
 QuickSec:AddButton({ Title = "Toggle Glass", Callback = function() MX:SetGlass(not MX:GetGlass()) end })

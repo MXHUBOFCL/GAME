@@ -22,7 +22,7 @@ if genv.MXUI and type(genv.MXUI.Destroy) == "function" then
 end
 
 local MX = {
-	Version = "1.0.0",
+	Version = "1.1.0",
 	Brand = "MX",
 	Flags = {},
 	Options = {},
@@ -1685,6 +1685,7 @@ function MX:DeleteConfig(name)
 	name = CleanName(name)
 	if not (delfile and isfile) then return false end
 	local p = MX.ConfigFolder .. "/" .. name .. ".json"
+	if MX:GetAutoLoad() == name then MX:SetAutoLoad(nil) end
 	if isfile(p) then return pcall(delfile, p) end
 	return false
 end
@@ -2354,17 +2355,28 @@ local function MakeMenu(title, width)
 	Pad(f, 8, 8, 8, 8)
 	List(f, 6)
 	Lbl(f, { Text = tostring(title or ""), Font = FONT.Bold, TextSize = 13, Size = UDim2.new(1, 0, 0, 18), LayoutOrder = 0 })
-	local sc = New("ScrollingFrame", { BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY, CanvasSize = UDim2.new(), AutomaticCanvasSize = AY, ScrollBarThickness = 3, ScrollingDirection = Enum.ScrollingDirection.Y, LayoutOrder = 1 }, f)
+	local sc = New("ScrollingFrame", { BackgroundTransparency = 1, BorderSizePixel = 0, Active = true, Selectable = false, ScrollingEnabled = true, ClipsDescendants = true, Size = UDim2.new(1, 0, 0, 60), CanvasSize = UDim2.new(), ScrollBarThickness = Touch and 4 or 3, ScrollingDirection = Enum.ScrollingDirection.Y, ElasticBehavior = Enum.ElasticBehavior.WhenScrollable, ScrollBarInset = Enum.ScrollBarInset.ScrollBar, VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar, LayoutOrder = 1 }, f)
 	Bind(sc, { ScrollBarImageColor3 = "Sub" })
-	local cons = New("UISizeConstraint", { MaxSize = Vector2.new(1e6, 300) }, sc)
-	List(sc, 5)
-	local c = setmetatable({ Content = sc, NoIndex = true, SizeConstraint = cons }, ContainerMT)
+	local layout = List(sc, 5)
+	Pad(sc, 0, 2, 0, 0)
+	local c = setmetatable({ Content = sc, NoIndex = true }, ContainerMT)
+	c.MaxH = 300
+	function c:_Fit()
+		if not sc.Parent then return end
+		local h = layout.AbsoluteContentSize.Y / math.max(MX.Scale, 0.01)
+		sc.CanvasSize = UDim2.fromOffset(0, h + 2)
+		sc.Size = UDim2.new(1, 0, 0, math.max(30, math.min(h + 2, c.MaxH)))
+	end
+	layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function() c:_Fit() end)
+	c.Scroll, c.Layout = sc, layout
 	return c, f
 end
 
 local function ShowMenu(menu, frame, anchor)
-	local maxH = math.max(140, Gui.AbsoluteSize.Y / MX.Scale - 120)
-	menu.SizeConstraint.MaxSize = Vector2.new(1e6, maxH)
+	local s = math.max(MX.Scale, 0.01)
+	menu.MaxH = math.max(120, math.floor(Gui.AbsoluteSize.Y / s - 70))
+	menu:_Fit()
+	menu.Scroll.CanvasPosition = Vector2.zero
 	MX:ShowPopup(frame, anchor, { AlignRight = true })
 end
 
