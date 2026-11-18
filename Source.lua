@@ -380,12 +380,12 @@ local function Drag(handle, o)
 			if o.Lock then MX:ScrollLock(false) end
 			if o.End then o.End() end
 		end
-		cm = UIS.InputChanged:Connect(function(i)
+		cm = Conn(UIS.InputChanged, function(i)
 			if i.UserInputType == Enum.UserInputType.MouseMovement or i == input then
 				o.Move(GuiPos(i), originG)
 			end
 		end)
-		ce = UIS.InputEnded:Connect(function(i)
+		ce = Conn(UIS.InputEnded, function(i)
 			if i == input or (t == Enum.UserInputType.MouseButton1 and i.UserInputType == t) then stop() end
 		end)
 		o.Move(originG, originG)
@@ -1401,7 +1401,7 @@ function MX:ShowPopup(f, anchor, opts)
 	f.Visible = true
 	Overlay.Visible = true
 	PlacePopup(p)
-	p.conn = RunService.RenderStepped:Connect(function()
+	p.conn = Conn(RunService.RenderStepped, function()
 		if not MX.Dead and f.Visible then PlacePopup(p) end
 	end)
 end
@@ -1449,7 +1449,7 @@ function MX:Listen(cb)
 	if MX.Listening then return end
 	MX.Listening = true
 	local c
-	c = UIS.InputBegan:Connect(function(input)
+	c = Conn(UIS.InputBegan, function(input)
 		local t = input.UserInputType
 		local result, ok = nil, false
 		if t == Enum.UserInputType.Keyboard then
@@ -1464,9 +1464,11 @@ function MX:Listen(cb)
 		end
 		if not ok then return end
 		c:Disconnect()
+		MX._listenConn = nil
 		task.delay(0.08, function() MX.Listening = false end)
 		cb(result)
 	end)
+	MX._listenConn = c
 end
 
 local function MakeBind(name, mode, key, fire, active)
@@ -1553,7 +1555,8 @@ local function Hex(c) return string.format("#%02x%02x%02x", math.floor(c.R * 255
 
 local NoteHolder = New("Frame", {
 	Name = "Notes", BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.new(0, Mobile and 250 or 280, 0, 0), AutomaticSize = AY,
-	AnchorPoint = Vector2.new(0, 0), Position = UDim2.new(0, 10, 0, 8),
+	-- Below Roblox's top bar (the ScreenGui ignores the GUI inset).
+	AnchorPoint = Vector2.new(0, 0), Position = UDim2.new(0, 10, 0, TopInset() + 8),
 }, NoteLayer)
 List(NoteHolder, 8, Enum.FillDirection.Vertical, Enum.HorizontalAlignment.Left)
 Scaled(NoteHolder)
@@ -1634,12 +1637,6 @@ for _, k in ipairs({ "Info", "Success", "Warning", "Error" }) do
 	MX[k] = function(self, title, content, dur)
 		return self:Notify({ Type = k, Title = title, Content = content, Duration = dur })
 	end
-end
-
-local function JEnc(v)
-	if typeof(v) == "Color3" then return { __c = { v.R, v.G, v.B } } end
-	if typeof(v) == "EnumItem" then return { __e = tostring(v) } end
-	return v
 end
 
 local function CleanName(n) return (tostring(n or ""):gsub("[\\/:*?\"<>|]", ""):match("^%s*(.-)%s*$")) end
@@ -2064,7 +2061,7 @@ function Container:AddButton(o)
 				fill.Visible = true
 				local t0 = os.clock()
 				task.spawn(function()
-					while holding do
+					while holding and not MX.Dead do
 						local p = math.clamp((os.clock() - t0) / dur, 0, 1)
 						fill.Size = UDim2.new(p, 0, 1, 0)
 						if p >= 1 then
@@ -2250,7 +2247,7 @@ local function BuildPicker(cp)
 	New("UICorner", { CornerRadius = UDim.new(1, 0) }, rk)
 	local rh = Hit(rt, 3)
 	local sh = New("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY, LayoutOrder = 6 }, f)
-	local sl = New("UIListLayout", { Padding = UDim.new(0, 4), FillDirection = Enum.FillDirection.Horizontal, Wraps = true, SortOrder = Enum.SortOrder.LayoutOrder }, sh)
+	New("UIListLayout", { Padding = UDim.new(0, 4), FillDirection = Enum.FillDirection.Horizontal, Wraps = true, SortOrder = Enum.SortOrder.LayoutOrder }, sh)
 	local function refresh()
 		local col = cp:Get()
 		sv.BackgroundColor3 = Color3.fromHSV(cp.H, 1, 1)
@@ -2681,7 +2678,7 @@ function Container:AddNumberInput(o)
 			if obj.Locked then return end
 			local held = true
 			local conn
-			conn = UIS.InputEnded:Connect(function(e)
+			conn = Conn(UIS.InputEnded, function(e)
 				if e == i or e.UserInputType == Enum.UserInputType.MouseButton1 then
 					held = false
 					conn:Disconnect()
@@ -2691,8 +2688,8 @@ function Container:AddNumberInput(o)
 				local step = function() obj:Set(obj.Value + dir * inc * (UIS:IsKeyDown(Enum.KeyCode.LeftShift) and 10 or 1)) end
 				step()
 				local t0 = os.clock()
-				while held and os.clock() - t0 < 0.4 do task.wait() end
-				while held do
+				while held and not MX.Dead and os.clock() - t0 < 0.4 do task.wait() end
+				while held and not MX.Dead do
 					step()
 					task.wait(0.06)
 				end
@@ -3162,11 +3159,11 @@ function Container:AddConfigManager(o)
 		self:AddLabel("Config saving is not supported by your executor.")
 		return nil
 	end
-	local sel, nameText
+	local sel
 	local drop
 	local function list() return MX:ListConfigs() end
 	drop = self:AddDropdown({ Title = "Config", Values = list(), Placeholder = "Select config", Flag = "_cfg_list", Callback = function(v) sel = v end })
-	local tb = self:AddTextbox({ Title = "Name", Placeholder = "New config name", Flag = "_cfg_name", Callback = function(t) nameText = t end })
+	local tb = self:AddTextbox({ Title = "Name", Placeholder = "New config name", Flag = "_cfg_name" })
 	local function refresh()
 		drop:Refresh(list())
 		if sel and table.find(drop.Values, sel) then drop:Set(sel, true) else sel = nil end
@@ -3199,7 +3196,13 @@ function Container:AddConfigManager(o)
 		sel = nil
 		refresh()
 	end })
-	self:AddToggle({ Title = "Autoload Selected", Description = "Loads it with MX:LoadAutoConfig()", Style = "Switch", Flag = "_cfg_auto", Default = MX:GetAutoLoad() ~= nil, Callback = function(v)
+	local auto
+	auto = self:AddToggle({ Title = "Autoload Selected", Description = "Loads it with MX:LoadAutoConfig()", Style = "Switch", Flag = "_cfg_auto", Default = MX:GetAutoLoad() ~= nil, Callback = function(v)
+		if v and not sel then
+			MX:Notify({ Type = "Warning", Title = "Config", Content = "Select a config first.", Duration = 2 })
+			auto:Set(false, true)
+			return
+		end
 		MX:SetAutoLoad(v and sel or nil)
 	end })
 	self:AddButton({ Title = "Refresh", Callback = function() refresh() end })
@@ -3230,7 +3233,7 @@ local function NewSection(parent, base, o)
 	List(card, 0)
 	local sec = setmetatable({ Frame = card, Win = base.Win, Owner = base.Owner, NoIndex = base.NoIndex, SecTitle = title, Up = base.Up, Collapsed = false, ToggleValue = o.Default and true or false }, SectionMT)
 	sec.SecObj = sec
-	sec.Reveal = function() if sec.Collapsed then sec:SetCollapsed(true == false) end end
+	sec.Reveal = function() if sec.Collapsed then sec:SetCollapsed(false) end end
 	local HH = Touch and 38 or 32
 	local header = New("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, headless and 6 or HH), LayoutOrder = 0 }, card)
 	local body = New("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY, LayoutOrder = 1 }, card)
@@ -3262,7 +3265,7 @@ local function NewSection(parent, base, o)
 			local sh = Hit(swTrack, 5)
 			sh.Activated:Connect(function() sec:SetToggle(not sec.ToggleValue) end)
 		end
-		local line = Box(header, { Size = UDim2.new(1, -20, 0, 1), Position = UDim2.new(0, 10, 1, -1), BackgroundTransparency = 0.5 }, "Border")
+		Box(header, { Size = UDim2.new(1, -20, 0, 1), Position = UDim2.new(0, 10, 1, -1), BackgroundTransparency = 0.5 }, "Border")
 	end
 	local dim
 	if o.Toggle and o.Dim then
@@ -3393,8 +3396,7 @@ function Page:Reflow()
 		else
 			if not band then newBand(false) end
 			local target
-			if cols == 1 then target = L
-			elseif it.side == "Left" then target = L
+			if cols == 1 or it.side == "Left" then target = L
 			elseif it.side == "Right" then target = R
 			else
 				target = left and L or R
@@ -3634,7 +3636,11 @@ function Window:FocusSearch() if self.SearchBox then self.SearchBox:CaptureFocus
 
 function Window:Dialog(o)
 	o = o or {}
+	if MX.Dead then return end
+	-- Only one dialog at a time (e.g. tapping the X button repeatedly).
+	if self._dialog and self._dialog.Parent then self._dialog:Destroy() end
 	local dim = New("TextButton", { AutoButtonColor = false, Text = "", BackgroundColor3 = C3(0, 0, 0), BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 60, BorderSizePixel = 0 }, self.Main)
+	self._dialog = dim
 	New("UICorner", { CornerRadius = UDim.new(0, 10) }, dim)
 	Tween(dim, { BackgroundTransparency = 0.45 }, 0.15)
 	local card = Box(dim, { Size = UDim2.new(0, math.min(340, (self.W or 400) - 40), 0, 0), AutomaticSize = AY, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), ZIndex = 61 }, "Card", 10, "Border")
@@ -3998,7 +4004,7 @@ function MX:CreateWindow(o)
 	List(hl, 8, Enum.FillDirection.Horizontal, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
 	local bsz = Touch and 32 or 28
 	if o.Collapsible ~= false then
-		local cb, ch = PaletteButton(hl, "menu", 1, bsz)
+		local _, ch = PaletteButton(hl, "menu", 1, bsz)
 		ch.Activated:Connect(function() win:ToggleSidebar() end)
 	end
 	local logo = MXLogo(hl, 24)
@@ -4087,9 +4093,9 @@ function MX:CreateWindow(o)
 		ShowMenu(win.QuickMenu, win.QuickFrame, gb)
 	end)
 
-	local mb, mh = PaletteButton(hr, "minus", 5, bsz)
+	local _, mh = PaletteButton(hr, "minus", 5, bsz)
 	mh.Activated:Connect(function() win:Toggle(false) end)
-	local xb, xh = PaletteButton(hr, "x", 6, bsz)
+	local _, xh = PaletteButton(hr, "x", 6, bsz)
 	MX:Tip(xh, "Unload Script")
 	xh.Activated:Connect(function() win:ConfirmUnload() end)
 
@@ -4761,13 +4767,15 @@ function MX:AddWindow(o)
 	end
 	function H:SetSize(a, b)
 		if typeof(a) == "Vector2" then a, b = a.X, a.Y end
-		b = b or h
-		w, h = math.clamp(a, minW, maxW), math.clamp(b, minH, maxH)
+		a, b = tonumber(a) or w, tonumber(b) or h
+		-- math.clamp errors when max < min, so never let the limits cross.
+		w, h = math.clamp(a, minW, math.max(minW, maxW)), math.clamp(b, minH, math.max(minH, maxH))
 		f.Size = UDim2.fromOffset(w, h)
 	end
 	function H:GetSize() return Vector2.new(w, h) end
 	function H:SetLimits(mn, mx)
-		minW, minH, maxW, maxH = mn.X, mn.Y, mx.X, mx.Y
+		if typeof(mn) == "Vector2" then minW, minH = mn.X, mn.Y end
+		if typeof(mx) == "Vector2" then maxW, maxH = mx.X, mx.Y end
 	end
 	function H:SetPosition(p)
 		if typeof(p) == "Vector2" then p = UDim2.fromOffset(p.X, p.Y) end
