@@ -48,8 +48,6 @@ local MX = {
 }
 genv.MXUI = MX
 
--- Every connection that is NOT owned by a GUI instance (UIS, RunService, camera...) goes
--- through Conn so MX:Destroy() can disconnect it. Disconnected entries are pruned.
 local Conns = {}
 local function Conn(sig, fn)
 	local c = sig:Connect(fn)
@@ -68,8 +66,6 @@ local function Conn(sig, fn)
 	return c
 end
 
--- Keep a flagged option (toggle/slider) in sync with state changed through the API,
--- without firing its callback.
 local function SyncOpt(flag, v)
 	local o = MX.Options[flag]
 	if o and type(o.Set) == "function" and o.Value ~= v then pcall(o.Set, o, v, true) end
@@ -146,8 +142,6 @@ function MX:AddThemes(t)
 	table.sort(names)
 	for _, name in ipairs(names) do
 		local d = table.clone(t[name])
-		-- Every theme must define every colour token, otherwise SetTheme would write nil into
-		-- bound properties (runtime error). Missing tokens fall back to the default palette.
 		for _, k in ipairs(ThemeKeys) do
 			if typeof(d[k]) ~= "Color3" then
 				if d[k] ~= nil then warn("[MX] Theme '" .. name .. "': " .. k .. " is not a Color3, using default") end
@@ -188,7 +182,6 @@ MX:AddThemes({
 	["Mono"] = { Window = C3(12, 12, 12), Side = C3(7, 7, 7), Panel = C3(16, 16, 16), Card = C3(22, 22, 22), Element = C3(31, 31, 31), Hover = C3(43, 43, 43), Border = C3(64, 64, 64), Accent = C3(235, 235, 235), Text = C3(245, 245, 245), Sub = C3(140, 140, 140), Off = C3(50, 50, 50) },
 })
 do
-	-- Keep the built-in order stable; any theme not listed here is appended at the end.
 	local order = { "Obsidian", "Frost", "Violet", "Ocean", "Sunset", "Mono", "Rose", "Crimson", "Onyx", "Dark", "Darker", "Light", "Aqua", "Lagoon", "Amethyst", "Toxic", "Noir", "Emerald" }
 	for _, n in ipairs(MX.ThemeOrder) do
 		if not table.find(order, n) then table.insert(order, n) end
@@ -260,7 +253,6 @@ local function Bind(o, map)
 		PruneAt = math.max(600, w * 2)
 	end
 end
--- a = BackgroundTransparency while Glass is on (1 = hidden). base = value when Glass is off.
 local function GlassOn(o, a)
 	if #GlassReg > 400 then
 		for i = #GlassReg, 1, -1 do
@@ -1555,7 +1547,6 @@ local function Hex(c) return string.format("#%02x%02x%02x", math.floor(c.R * 255
 
 local NoteHolder = New("Frame", {
 	Name = "Notes", BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.new(0, Mobile and 250 or 280, 0, 0), AutomaticSize = AY,
-	-- Below Roblox's top bar (the ScreenGui ignores the GUI inset).
 	AnchorPoint = Vector2.new(0, 0), Position = UDim2.new(0, 10, 0, TopInset() + 8),
 }, NoteLayer)
 List(NoteHolder, 8, Enum.FillDirection.Vertical, Enum.HorizontalAlignment.Left)
@@ -1730,11 +1721,6 @@ end
 
 MX.Utils.Copy = function(t) return Copy(t) end
 
--- Glass: one translucent pane. Only the window base and floating cards are tinted; inner
--- layers (header, sidebar, content) and their corner filler pieces turn fully transparent,
--- so overlapping translucent frames no longer stack into darker strips/boxes.
--- (The old "Screen Blur" / DepthOfField part-blur was removed: it blurred the game world,
--- was expensive, and only rendered on high graphics settings.)
 local GlassHooks = {}
 function MX:SetGlass(v)
 	MX.Glass = v and true or false
@@ -1753,7 +1739,6 @@ function MX:SetGlass(v)
 	SyncOpt("glass", MX.Glass)
 end
 function MX:GetGlass() return MX.Glass end
--- Deprecated no-ops kept so scripts written for older versions don't error.
 function MX:SetGlassBlur() end
 function MX:SetBlurSize() end
 
@@ -1766,8 +1751,6 @@ local function Watch(inst, fn)
 	end)
 end
 
--- Reg can hold non-GuiObjects (UIStroke, UIGradient, ...). Only GuiObjects have
--- AbsolutePosition, so resolve the nearest GuiObject before reading layout props.
 local function GuiAnchor(o)
 	if o:IsA("GuiObject") then return o end
 	return o:FindFirstAncestorWhichIsA("GuiObject")
@@ -1801,7 +1784,6 @@ function MX:SetTheme(name, instant)
 	end
 	for k, v in pairs(def) do Theme[k] = v end
 	local function apply(list)
-		-- A newer SetTheme call supersedes delayed buckets from this one.
 		if gen ~= ThemeGen or MX.Dead then return end
 		for _, e in ipairs(list) do
 			if e.o.Parent then
@@ -1812,7 +1794,6 @@ function MX:SetTheme(name, instant)
 					if sweep then
 						Tween(e.o, { [e.p] = v }, 0.2)
 					else
-						-- Cancel hover/press tweens so they don't finish on the old theme colour.
 						if running then running:Cancel() st[e.p] = nil end
 						e.o[e.p] = v
 					end
@@ -3649,7 +3630,6 @@ function Window:FocusSearch() if self.SearchBox then self.SearchBox:CaptureFocus
 function Window:Dialog(o)
 	o = o or {}
 	if MX.Dead then return end
-	-- Only one dialog at a time (e.g. tapping the X button repeatedly).
 	if self._dialog and self._dialog.Parent then self._dialog:Destroy() end
 	local dim = New("TextButton", { AutoButtonColor = false, Text = "", BackgroundColor3 = C3(0, 0, 0), BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 60, BorderSizePixel = 0 }, self.Main)
 	self._dialog = dim
@@ -3679,11 +3659,6 @@ function Window:Dialog(o)
 end
 function MX:Dialog(o) if MX.Window then MX.Window:Dialog(o) end end
 
--- Effects -------------------------------------------------------------------------------
--- Shooting Stars, Snow, Rain and Fire. All effects of a window share ONE Heartbeat
--- connection that only exists while at least one effect is on AND the window is open.
--- Particles are pooled Frames, capped per effect (Max * Intensity), recycled when they
--- leave the area and destroyed when the effect is turned off or the UI is unloaded.
 MX.EffectOrder = { "Stars", "Snow", "Rain", "Fire" }
 MX.EffectIntensity = 0.6
 local EffectDefs = {}
@@ -3721,7 +3696,6 @@ EffectDefs.Snow = {
 		New("UICorner", { CornerRadius = UDim.new(1, 0) }, f)
 		return f
 	end,
-	-- Theme Text colour: white flakes on dark themes, dark flakes on light themes.
 	Color = function(f) f.BackgroundColor3 = Theme.Text end,
 	Spawn = function(p, w)
 		local s = math.random(2, 5)
@@ -3770,7 +3744,7 @@ EffectDefs.Fire = {
 		New("UICorner", { CornerRadius = UDim.new(1, 0) }, f)
 		return f
 	end,
-	Color = function() end, -- coloured per frame from its age (mixed with the theme accent)
+	Color = function() end,
 	Extra = function(layer)
 		local glow = New("Frame", { BorderSizePixel = 0, AnchorPoint = Vector2.new(0, 1), Position = UDim2.fromScale(0, 1), Size = UDim2.new(1, 0, 0, 70) }, layer)
 		New("UIGradient", { Rotation = 90, Transparency = NumberSequence.new(1, 0.55) }, glow)
@@ -3901,7 +3875,6 @@ function MX:SetEffect(name, on) if MX.Window then MX.Window:SetEffect(name, on) 
 
 function Window:_FxInit(content)
 	self.Fx = {}
-	-- Sits under the pages (PageHost ZIndex 2) and above the content background/fillers.
 	local layer = New("Frame", { Name = "Effects", BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.fromScale(1, 1), ClipsDescendants = true, ZIndex = 1, Visible = false }, content)
 	self.FxLayer = layer
 	self._fxStop = function()
@@ -3995,7 +3968,6 @@ function MX:CreateWindow(o)
 	GlassOn(main, 0.2)
 	win.Main = main
 	do
-		-- Subtle top-to-bottom sheen, only while Glass is on.
 		local sheen = New("UIGradient", { Rotation = 90, Enabled = MX.Glass, Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 0.35) }) }, main)
 		table.insert(GlassHooks, function(on)
 			if not sheen.Parent then return false end
@@ -4140,7 +4112,6 @@ function MX:CreateWindow(o)
 	if profileH > 0 then
 		local pf = Box(sidebar, { Size = UDim2.new(1, 0, 0, profileH), AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 0, 1, 0) }, "Panel")
 		GlassOn(pf, 1)
-		-- Round only the bottom-left corner so it doesn't poke out of the window's rounded corner.
 		RoundBox(pf, "Panel", 1, "left")
 		Box(pf, { Size = UDim2.new(1, -16, 0, 1), Position = UDim2.new(0, 8, 0, 0), BackgroundTransparency = 0.5 }, "Border")
 		local av = New("ImageLabel", { Size = UDim2.fromOffset(32, 32), Position = UDim2.new(0, 12, 0.5, -16), BackgroundTransparency = 0, BorderSizePixel = 0, Image = "" }, pf)
@@ -4205,7 +4176,6 @@ function MX:CreateWindow(o)
 	if mbOpt == true or type(mbOpt) == "table" or (mbOpt == "Auto" and Touch) then
 		win:SetMobileButton(true, type(mbOpt) == "table" and mbOpt or nil)
 	end
-	-- Built eagerly so its flags (glass, watermark, ui_scale, ...) exist before LoadConfig/LoadAutoConfig.
 	win:_BuildQuickSettings()
 	return win
 end
@@ -4285,7 +4255,6 @@ function Window:SetMobileButton(on, opts)
 	self:_UpdateMobileBtn()
 end
 
--- Flags owned by the library itself; they are not "features" and are not reset on unload.
 local InternalFlags = { glass = true, watermark = true, keybind_list = true, mobile_button = true, ui_scale = true, ui_locked = true, menu_key = true, theme = true, themefade = true, stars = true }
 MX.UnloadCallbacks = {}
 MX.UnloadResetsToggles = true
@@ -4295,7 +4264,6 @@ end
 
 function MX:Destroy()
 	if MX.Dead then return end
-	-- 1) Let the script switch its features off while everything still exists.
 	if MX.UnloadResetsToggles then
 		for flag, obj in pairs(MX.Options) do
 			if type(obj) == "table" and not InternalFlags[flag] and flag:sub(1, 3) ~= "fx_" and flag:sub(1, 1) ~= "_" then
@@ -4311,7 +4279,6 @@ function MX:Destroy()
 		local ok, err = pcall(fn)
 		if not ok then warn("[MX] OnUnload: " .. tostring(err)) end
 	end
-	-- 2) Stop everything: popups (RenderStepped), effects, loops, binds, connections.
 	pcall(function() MX:CloseAllPopups() end)
 	MX.Dead = true
 	MX.Listening = false
@@ -4331,7 +4298,6 @@ function MX:Destroy()
 	table.clear(GlassHooks)
 	table.clear(GlassReg)
 	table.clear(Reg)
-	-- 3) Remove the GUI (destroys every instance-owned connection and tween target).
 	if Gui then pcall(function() Gui:Destroy() end) end
 	MX.Watermark, MX.KeyList, MX.Window = nil, nil, nil
 	if genv.MXUI == MX then genv.MXUI = nil end
@@ -4348,7 +4314,6 @@ local Corners = {
 local function Place(frame, corner, margin)
 	local c = Corners[corner] or Corners.TopRight
 	frame.AnchorPoint = c[1]
-	-- The ScreenGui ignores the GUI inset, so keep top-anchored widgets below Roblox's top bar.
 	local top = c[3] == 0 and TopInset() or 0
 	frame.Position = UDim2.new(c[2], c[4] * margin, c[3], c[5] * margin + top)
 end
@@ -4468,7 +4433,6 @@ function MX:CreateWatermark(o)
 	return wm
 end
 
--- Quick Settings / API helper: creates a default watermark the first time it is enabled.
 function MX:SetWatermark(v)
 	v = v and true or false
 	if MX.Dead then return end
@@ -4780,7 +4744,6 @@ function MX:AddWindow(o)
 	function H:SetSize(a, b)
 		if typeof(a) == "Vector2" then a, b = a.X, a.Y end
 		a, b = tonumber(a) or w, tonumber(b) or h
-		-- math.clamp errors when max < min, so never let the limits cross.
 		w, h = math.clamp(a, minW, math.max(minW, maxW)), math.clamp(b, minH, math.max(minH, maxH))
 		f.Size = UDim2.fromOffset(w, h)
 	end
@@ -4831,7 +4794,6 @@ function MX:AddWindow(o)
 end
 function Window:AddWindow(o) return MX:AddWindow(o) end
 
--- Quick Settings (gear in the header): functional settings.
 function Window:_BuildQuickSettings()
 	if self.QuickMenu then return self.QuickMenu end
 	local win = self
@@ -4896,7 +4858,6 @@ function Window:ConfirmUnload()
 	} })
 end
 
--- Settings tab (sidebar): appearance only. Functional settings live in Quick Settings.
 function Window:AddSettingsTab(o)
 	if self._settingsTab then return self._settingsTab end
 	o = o or {}

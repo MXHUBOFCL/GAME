@@ -40,19 +40,15 @@ local Window = MX:CreateWindow({
 	TabWidth = 170,
 	Theme = "Obsidian",
 	MobileButton = "Auto",
-	-- Background effects (also in Settings > Effects): Stars, Snow, Rain, Fire.
 	Effects = { Snow = true },
 	EffectIntensity = 60,
 })
 
--- Watermark and keybind list can also be switched on/off from Quick Settings (gear icon).
 local Watermark = MX:CreateWatermark({ Title = "MX HUB" })
 Watermark:AddTime()
 
 MX:CreateKeybindList({ Key = Enum.KeyCode.K, Visible = false })
 
--- Runs when the user presses "Unload Script" in Quick Settings or the X button.
--- Toggles are switched off automatically first (set MX.UnloadResetsToggles = false to disable).
 if MX.OnUnload then
 	MX:OnUnload(function()
 		print("[MX] unloaded")
@@ -166,7 +162,6 @@ local Inner = Tabs:AddTabs({ "First", "Second" })
 Inner.Pages.First:AddToggle({ Title = "Toggle On First", Flag = "inner_t" })
 Inner.Pages.Second:AddButton({ Title = "Back To First", Callback = function() Inner:Select("First") end })
 
--- Settings tab = Theme + Effects. Everything functional lives in Quick Settings.
 Window:AddSettingsTab()
 MX:LoadAutoConfig()
 MX:Info("MX HUB", "Loaded. Tap the MX button or press INSERT. Gear icon = Quick Settings.")
