@@ -105,8 +105,28 @@ function FS.ok()
 	return type(writefile) == "function" and type(readfile) == "function" and type(isfolder) == "function" and type(makefolder) == "function"
 end
 local function EnsureFolder(p)
-	if FS.ok() and not isfolder(p) then pcall(makefolder, p) end
+	if not FS.ok() then return end
+	local path = ""
+	for seg in tostring(p):gmatch("[^/\\]+") do
+		path = path == "" and seg or path .. "/" .. seg
+		if not isfolder(path) then pcall(makefolder, path) end
+	end
 end
+
+MX._pending = {}
+MX._ignore = {}
+setmetatable(MX.Options, {
+	__newindex = function(t, k, v)
+		rawset(t, k, v)
+		local p = MX._pending[k]
+		if p ~= nil and type(v) == "table" and v.Deserialize then
+			MX._pending[k] = nil
+			task.defer(function()
+				if MX.Options[k] == v then pcall(v.Deserialize, v, p) end
+			end)
+		end
+	end,
+})
 
 local Theme = {}
 local Reg, GlassReg = {}, {}
@@ -374,45 +394,51 @@ Conn(UIS.InputChanged, function(i)
 end)
 
 local function Tap(hit, fn)
-	local act, sp, sf, sc0
-	local last, rejectedAt = -1, -1
-	local function fire()
-		local n = os.clock()
-		if n - last < 0.15 then return end
-		last = n
-		fn()
-	end
-	local function scrolled()
-		return sf ~= nil and sc0 ~= nil and (sf.CanvasPosition - sc0).Magnitude > 2
+	local act, sp, sf, sc0, peak, mv
+	local last = -1
+	local function reset()
+		if mv then
+			mv:Disconnect()
+			mv = nil
+		end
+		act, sp, sf, sc0, peak = nil, nil, nil, nil, nil
 	end
 	hit.InputBegan:Connect(function(i)
 		local t = i.UserInputType
 		if t ~= Enum.UserInputType.MouseButton1 and t ~= Enum.UserInputType.Touch then return end
+		if mv then mv:Disconnect() end
 		act = i
+		peak = 0
 		sp = Vector2.new(i.Position.X, i.Position.Y)
 		sf = hit.Parent
 		while sf and not sf:IsA("ScrollingFrame") do sf = sf.Parent end
 		sc0 = sf and sf.CanvasPosition or nil
+		mv = UIS.InputChanged:Connect(function(c)
+			if not act then return end
+			if c == act or (act.UserInputType == Enum.UserInputType.MouseButton1 and c.UserInputType == Enum.UserInputType.MouseMovement) then
+				local d = (Vector2.new(c.Position.X, c.Position.Y) - sp).Magnitude
+				if d > peak then peak = d end
+			end
+		end)
 	end)
 	hit.InputEnded:Connect(function(i)
-		if not act then return end
-		local same = (i == act) or (i.UserInputType == Enum.UserInputType.MouseButton1 and act.UserInputType == i.UserInputType)
-		if not same then return end
-		local lim = act.UserInputType == Enum.UserInputType.Touch and 16 or 8
-		act = nil
-		local moved = (Vector2.new(i.Position.X, i.Position.Y) - sp).Magnitude > lim
-		if moved or scrolled() then
-			rejectedAt = os.clock()
-			return
+		if i ~= act then return end
+		local d = (Vector2.new(i.Position.X, i.Position.Y) - sp).Magnitude
+		if d > peak then peak = d end
+		if mv then
+			mv:Disconnect()
+			mv = nil
 		end
-		fire()
 	end)
 	hit.Activated:Connect(function()
-		task.defer(function()
-			if os.clock() - rejectedAt < 0.25 then return end
-			if scrolled() then return end
-			fire()
-		end)
+		local lim = act and act.UserInputType == Enum.UserInputType.Touch and 14 or 8
+		local blocked = (sf ~= nil and sc0 ~= nil and (sf.CanvasPosition - sc0).Magnitude > 4) or (peak ~= nil and peak > lim)
+		reset()
+		if blocked then return end
+		local n = os.clock()
+		if n - last < 0.08 then return end
+		last = n
+		fn()
 	end)
 end
 
@@ -1729,14 +1755,9 @@ function MX:SaveConfig(name)
 	name = CleanName(name)
 	if not FS.ok() or name == "" then return false end
 	EnsureFolder(MX.ConfigFolder)
-	local data = {}
-	for flag, obj in pairs(MX.Options) do
-		if flag:sub(1, 1) ~= "_" and obj.Serialize then
-			local ok, v = pcall(obj.Serialize, obj)
-			if ok then data[flag] = v end
-		end
-	end
-	local ok = pcall(writefile, MX.ConfigFolder .. "/" .. name .. ".json", HttpService:JSONEncode(data))
+	local okE, text = pcall(function() return HttpService:JSONEncode(MX:_Collect()) end)
+	if not okE then return false end
+	local ok = pcall(writefile, MX.ConfigFolder .. "/" .. name .. ".json", text)
 	return ok
 end
 function MX:LoadConfig(name)
@@ -1746,10 +1767,7 @@ function MX:LoadConfig(name)
 	if not (isfile and isfile(path)) then return false end
 	local ok, data = pcall(function() return HttpService:JSONDecode(readfile(path)) end)
 	if not ok or type(data) ~= "table" then return false end
-	for flag, v in pairs(data) do
-		local obj = MX.Options[flag]
-		if obj and obj.Deserialize then pcall(obj.Deserialize, obj, v) end
-	end
+	MX:_Apply(data)
 	MX.LoadedConfig = name
 	MX._lastSnap = nil
 	return true
@@ -2354,10 +2372,15 @@ local function b64dec(s)
 end
 MX._b64enc, MX._b64dec = b64enc, b64dec
 
+function MX:SetIgnoreFlags(list)
+	for _, f in ipairs(list or {}) do MX._ignore[f] = true end
+end
 function MX:_Collect()
 	local data = {}
+	for flag, v in pairs(MX._pending) do data[flag] = v end
+	for flag in pairs(MX._ignore) do data[flag] = nil end
 	for flag, obj in pairs(MX.Options) do
-		if flag:sub(1, 1) ~= "_" and obj.Serialize then
+		if flag:sub(1, 1) ~= "_" and not MX._ignore[flag] and obj.Serialize then
 			local ok, v = pcall(obj.Serialize, obj)
 			if ok then data[flag] = v end
 		end
@@ -2365,10 +2388,24 @@ function MX:_Collect()
 	return data
 end
 function MX:_Apply(data)
+	MX._pending = {}
+	local rank = { Dropdown = 1, MultiSelect = 1, Slider = 2, NumberInput = 2, Textbox = 3, ColorPicker = 4, Keybind = 5, Toggle = 6 }
+	local queue = {}
 	for flag, v in pairs(data) do
-		local obj = MX.Options[flag]
-		if obj and obj.Deserialize then pcall(obj.Deserialize, obj, v) end
+		if not MX._ignore[flag] then
+			local obj = MX.Options[flag]
+			if obj and obj.Deserialize then
+				queue[#queue + 1] = { flag = flag, obj = obj, v = v, rank = rank[obj.Type] or 0 }
+			elseif obj == nil then
+				MX._pending[flag] = v
+			end
+		end
 	end
+	table.sort(queue, function(a, b)
+		if a.rank ~= b.rank then return a.rank < b.rank end
+		return a.flag < b.flag
+	end)
+	for _, q in ipairs(queue) do pcall(q.obj.Deserialize, q.obj, q.v) end
 end
 function MX:_Snapshot()
 	local data = MX:_Collect()
@@ -2409,9 +2446,11 @@ function MX:RenameConfig(old, new)
 	return true
 end
 function MX:ResetOptions()
+	local data = {}
 	for flag, obj in pairs(MX.Options) do
-		if flag:sub(1, 1) ~= "_" and obj._def ~= nil and obj.Deserialize then pcall(obj.Deserialize, obj, obj._def) end
+		if flag:sub(1, 1) ~= "_" and obj._def ~= nil and obj.Deserialize then data[flag] = obj._def end
 	end
+	MX:_Apply(data)
 end
 
 MX.AutoSave = false
@@ -3282,7 +3321,7 @@ function Container:AddSlider(o)
 	if o.Description and o.Description ~= "" then
 		Lbl(row, { Text = tostring(o.Description), TextSize = 12, Font = FONT.Reg, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY, TextWrapped = true, TextYAlignment = Enum.TextYAlignment.Top, LayoutOrder = 2 }, "Sub")
 	end
-	local wrap, track, fill = Bar(row)
+	local wrap, track, fill = Bar(row, Touch and 36 or nil)
 	wrap.LayoutOrder = 3
 	if o.BarWidth then wrap.Size = UDim2.new(0, o.BarWidth, 0, wrap.Size.Y.Offset) end
 	local knob = Knob(track)
@@ -3324,11 +3363,7 @@ function Container:AddSlider(o)
 		Begin = function(i)
 			if obj.Locked then return false end
 			touchOff = 0
-			if i.UserInputType == Enum.UserInputType.Touch then
-				local c = knob.AbsolutePosition + knob.AbsoluteSize / 2
-				local p = GuiPos(i)
-				if math.abs(p.X - c.X) <= 28 and math.abs(p.Y - c.Y) <= 28 then touchOff = c.X - p.X end
-			end
+			if i.UserInputType == Enum.UserInputType.Touch then return false end
 			if i.UserInputType == Enum.UserInputType.MouseButton1 and UIS:IsKeyDown(Enum.KeyCode.LeftControl) then
 				fine = o.FineFactor or 0.1
 				startVal = obj.Value
@@ -3346,6 +3381,55 @@ function Container:AddSlider(o)
 			end
 		end,
 	})
+	wrap.InputBegan:Connect(function(i)
+		if i.UserInputType ~= Enum.UserInputType.Touch or obj.Locked then return end
+		local start = GuiPos(i)
+		local c = knob.AbsolutePosition + knob.AbsoluteSize / 2
+		local grab = math.abs(start.X - c.X) <= 28 and math.abs(start.Y - c.Y) <= 28
+		local off = grab and (c.X - start.X) or 0
+		local active, dead = false, false
+		local cm, ce
+		local function setFrom(x)
+			local w = math.max(track.AbsoluteSize.X, 1)
+			obj:Set(min + math.clamp((x + off - track.AbsolutePosition.X) / w, 0, 1) * (max - min))
+		end
+		local function done()
+			if cm then
+				cm:Disconnect()
+				cm = nil
+			end
+			if ce then
+				ce:Disconnect()
+				ce = nil
+			end
+			if active then MX:ScrollLock(false) end
+		end
+		cm = UIS.InputChanged:Connect(function(c2)
+			if c2 ~= i or dead then return end
+			local p = GuiPos(c2)
+			if not active then
+				local dx, dy = math.abs(p.X - start.X), math.abs(p.Y - start.Y)
+				if grab or (dx > 8 and dx > dy) then
+					active = true
+					MX:ScrollLock(true)
+				elseif dy > 8 then
+					dead = true
+					return
+				else
+					return
+				end
+			end
+			setFrom(p.X)
+		end)
+		ce = UIS.InputEnded:Connect(function(e)
+			if e ~= i then return end
+			if not active and not dead then
+				local p = GuiPos(e)
+				if (p - start).Magnitude <= 8 then setFrom(p.X) end
+			end
+			done()
+		end)
+	end)
 	wrap.InputBegan:Connect(function(i)
 		if i.UserInputType == Enum.UserInputType.MouseButton2 and not obj.Locked then obj:Set(o.Default or min) end
 	end)
@@ -3488,6 +3572,7 @@ function ListPopup(anchor, cfg)
 	Bind(sc, { ScrollBarImageColor3 = "Sub" })
 	List(sc, 2)
 	local items = {}
+	local openedAt = os.clock()
 	function paintAll()
 		for _, it in ipairs(items) do
 			local on = cfg.IsSel(it.v)
@@ -3539,6 +3624,7 @@ function ListPopup(anchor, cfg)
 			end
 		end)
 		Tap(hh, function()
+			if os.clock() - openedAt < 0.25 then return end
 			cfg.OnPick(v)
 			paintAll()
 			if not cfg.Multi then MX:ClosePopup() end
@@ -3928,9 +4014,16 @@ local function HoldTap(hit, fill, secs, fn)
 		if secs * (MX.HoldScale or 1) <= 0 then fn() return end
 		holding = true
 		fill.Visible = true
+		local sf = hit.Parent
+		while sf and not sf:IsA("ScrollingFrame") do sf = sf.Parent end
+		local sc0 = sf and sf.CanvasPosition or nil
 		local t0 = os.clock()
 		task.spawn(function()
 			while holding do
+				if sf and sc0 and (sf.CanvasPosition - sc0).Magnitude > 4 then
+					holding = false
+					break
+				end
 				local p = math.clamp((os.clock() - t0) / (secs * (MX.HoldScale or 1)), 0, 1)
 				fill.Size = UDim2.new(p, 0, 1, 0)
 				if p >= 1 then
@@ -4550,9 +4643,29 @@ function Window:_Fit()
 	self:_Clamp()
 end
 
-function Window:SetScale(s)
-	MX.UserScale = math.clamp(s, 0.5, 1.6)
-	self:_Fit()
+function Window:SetScale(s, instant)
+	self._scaleTarget = math.clamp(tonumber(s) or MX.UserScale, 0.5, 1.6)
+	if instant or math.abs(MX.UserScale - self._scaleTarget) < 0.001 then
+		if self._scaleConn then
+			self._scaleConn:Disconnect()
+			self._scaleConn = nil
+		end
+		MX.UserScale = self._scaleTarget
+		self:_Fit()
+		return
+	end
+	if self._scaleConn then return end
+	self._scaleConn = RunService.Heartbeat:Connect(function(dt)
+		local tgt = self._scaleTarget
+		local nxt = MX.UserScale + (tgt - MX.UserScale) * math.min(1, dt * 7)
+		if MX.Dead or math.abs(tgt - nxt) < 0.002 then nxt = tgt end
+		MX.UserScale = nxt
+		self:_Fit()
+		if nxt == tgt and self._scaleConn then
+			self._scaleConn:Disconnect()
+			self._scaleConn = nil
+		end
+	end)
 end
 function Window:SetSidebar(v)
 	self.Collapsed = v and true or false
@@ -4893,7 +5006,7 @@ function Window:_BuildProfile()
 	end
 
 	local scaleMenu, scaleFrame = MakeMenu("Menu Scale", 230)
-	local scaleSlider = scaleMenu:AddSlider({ Title = "Menu Scale", Flag = "ui_scale", Min = 60, Max = 140, Increment = 5, Default = 100, Suffix = "%", Callback = function(v)
+	local scaleSlider = scaleMenu:AddSlider({ Title = "Menu Scale", Flag = "ui_scale", Min = 60, Max = 140, Increment = 1, Default = 100, Suffix = "%", Callback = function(v)
 		win:SetScale(v / 100)
 		refresh()
 	end })
@@ -5274,7 +5387,7 @@ function Window:SetMobileButton(on, opts)
 			if not dragging then return end
 			if input.UserInputType == Enum.UserInputType.MouseMovement or (input.UserInputType == Enum.UserInputType.Touch and input == draginput) then
 				local delta = input.Position - dragstart
-				if not moved and delta.Magnitude < 12 then return end
+				if not moved and delta.Magnitude < 14 then return end
 				moved = true
 				btn.Position = UDim2.new(startpos.X.Scale, startpos.X.Offset + delta.X, startpos.Y.Scale, startpos.Y.Offset + delta.Y)
 				clampButton()

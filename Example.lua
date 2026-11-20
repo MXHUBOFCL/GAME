@@ -1,4 +1,4 @@
-local MX = loadstring(game:HttpGet("https://raw.githubusercontent.com/MXHUBOFCL/GAME/main/Source.lua"))()
+local MX = loadstring(game:HttpGet("https://raw.githubusercontent.com/YOUR_USER/YOUR_REPO/main/Source.lua"))()
 
 local C = Color3.fromRGB
 MX:AddThemes({
@@ -37,7 +37,7 @@ local Home = Window:AddTab("Home", "home")
 local Elements = Window:AddTab({ Title = "Elements", Icon = "sliders-horizontal", Badge = "NEW" })
 Window:AddCategory("Misc")
 
-Home:AddImage({ Title = "MX HUB", Description = "Tap to copy the Discord invite", Height = 110, Badge = "MX", Image = MX.WelcomeImage, Callback = function()
+Home:AddImage({ Title = "MX HUB", Description = "Tap to copy the Discord invite", Height = 110, Image = MX.WelcomeImage, Callback = function()
 	MX.Utils.Copy(MX.Discord)
 	MX:Success("Copied", MX.Discord)
 end })
