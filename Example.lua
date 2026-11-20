@@ -1,4 +1,4 @@
-local MX = loadstring(game:HttpGet("https://raw.githubusercontent.com/MXHUBOFCL/GAME/main/Source.lua"))()
+local MX = loadstring(game:HttpGet("https://raw.githubusercontent.com/YOUR_USER/YOUR_REPO/main/Source.lua"))()
 
 local C = Color3.fromRGB
 MX:AddThemes({
@@ -7,6 +7,7 @@ MX:AddThemes({
 })
 
 MX.Discord = "https://discord.gg/G7FCTC2mEk"
+MX.NotifyURL = "https://raw.githubusercontent.com/MXHUBOFCL/GAME/main/Notify.lua"
 
 MX:AddTranslations("Indonesia", {
 	["Welcome"] = "Selamat Datang", ["Labels and Progress"] = "Label dan Progres", ["Notifications"] = "Notifikasi",
@@ -22,7 +23,7 @@ local Window = MX:CreateWindow({
 	SubTitle = "MX UI v" .. MX.Version,
 	Size = Vector2.new(720, 460),
 	TabWidth = 170,
-	Theme = "Obsidian",
+	Theme = "Mono",
 	MobileButton = "Auto",
 	Effect = "Stars",
 })
@@ -37,7 +38,7 @@ local Home = Window:AddTab("Home", "home")
 local Elements = Window:AddTab({ Title = "Elements", Icon = "sliders-horizontal", Badge = "NEW" })
 Window:AddCategory("Misc")
 
-Home:AddImage({ Title = "MX HUB", Description = "Tap to copy the Discord invite", Height = 110, Image = MX.WelcomeImage, Callback = function()
+Home:AddImage({ Height = 110, Image = MX.WelcomeImage, Callback = function()
 	MX.Utils.Copy(MX.Discord)
 	MX:Success("Copied", MX.Discord)
 end })
@@ -67,10 +68,9 @@ Notes:AddButton({ Title = "With Buttons", Callback = function()
 	} })
 end })
 
-local Basic = Elements:AddSection({ Title = "Basic Toggles", Icon = "toggle-right" })
-Basic:AddToggle("Simple Toggle", false, function(v) demo("Simple Toggle", tostring(v)) end)
-Basic:AddToggle({ Title = "Checkbox Toggle", Description = "Tap anywhere on the row", Flag = "basic_check", Default = true, Callback = function(v) demo("Checkbox", tostring(v)) end })
-Basic:AddToggle({ Title = "Switch Toggle", Flag = "basic_switch", Style = "Switch", Callback = function(v) demo("Switch", tostring(v)) end })
+local Basic = Elements:AddSection({ Title = "Toggles", Icon = "toggle-right" })
+Basic:AddCheckbox({ Title = "Checkbox", Description = "Square box, filled when on", Flag = "basic_check", Default = true, Callback = function(v) demo("Checkbox", tostring(v)) end })
+Basic:AddSwitch({ Title = "Switch", Description = "Sliding switch", Flag = "basic_switch", Callback = function(v) demo("Switch", tostring(v)) end })
 
 local Extras = Elements:AddSection({ Title = "Toggle Extras", Icon = "settings" })
 Extras:AddToggle({ Title = "Boxes", Description = "Color swatch and a gear with options", Flag = "boxes", Options = {
@@ -81,7 +81,7 @@ Extras:AddToggle({ Title = "Boxes", Description = "Color swatch and a gear with 
 } })
 Extras:AddToggle({ Title = "Chams", Description = "Keybind, color and options together", Flag = "chams", Keybind = Enum.KeyCode.C, KeyMode = "Toggle", Color = { Flag = "chams_color", Default = C(96, 205, 255) }, Options = function(menu)
 	menu:AddSlider({ Title = "Transparency", Flag = "chams_trans", Min = 0, Max = 100, Default = 40, Suffix = "%" })
-	menu:AddMultiSelect({ Title = "Targets", Flag = "chams_targets", Values = { "Players", "NPCs", "Items" }, Default = { "Players" } })
+	menu:AddDropdown({ Title = "Targets", Flag = "chams_targets", Multi = true, Values = { "Players", "NPCs", "Items" }, Default = { "Players" } })
 end })
 Extras:AddToggle({ Title = "Fly", Description = "Toggle mode, press X. Tap it in the keybind list on mobile", Flag = "fly", Keybind = Enum.KeyCode.X, KeyMode = "Toggle", Style = "Switch" })
 Extras:AddToggle({ Title = "Sprint", Description = "Hold mode", Flag = "sprint", Keybind = Enum.KeyCode.LeftShift, KeyMode = "Hold", Style = "Switch" })
@@ -92,11 +92,8 @@ Sl:AddSlider({ Title = "WalkSpeed", Flag = "ws", Min = 16, Max = 120, Default = 
 Sl:AddNumberInput({ Title = "Amount", Flag = "amount", Min = 0, Max = 500, Default = 25, Increment = 5, Suffix = " pcs" })
 Sl:AddTextbox({ Title = "Textbox", Flag = "text", Placeholder = "Type something", Callback = function(t, enter) if enter then demo("Textbox", t) end end })
 
-local Dr = Elements:AddSection({ Title = "Dropdowns", Icon = "list" })
-Dr:AddDropdown({ Title = "Dropdown", Flag = "drop", Values = { "One", "Two", "Three" }, Default = "One" })
-Dr:AddMultiSelect({ Title = "Targets", Flag = "targets", Values = { "Players", "NPCs", "Items", "Chests", "Bosses", "Pets", "Vehicles", "Portals" }, Default = { "Players" } })
-Dr:AddDropdown({ Title = "With Search", Flag = "drop2", Values = { "Frankfurt", "Amsterdam", "London", "Paris", "Madrid", "Warsaw", "Stockholm", "Tokyo", "Jakarta" }, Default = "Jakarta" })
-Dr:AddMultiSelect({ Title = "Multi Select", Flag = "multi", Values = { "Red", "Green", "Blue", "Yellow" }, Default = { "Red" } })
+local Dr = Elements:AddSection({ Title = "Dropdown, Color, Key", Icon = "list" })
+Dr:AddDropdown({ Title = "Dropdown", Description = "One element. Multi = true allows many picks, search is always on", Flag = "drop", Multi = true, Values = { "Players", "NPCs", "Items", "Chests", "Bosses", "Pets", "Vehicles", "Portals" }, Default = { "Players" } })
 Dr:AddColorPicker({ Title = "Color Picker", Flag = "color", Default = C(255, 120, 170), DefaultAlpha = 1 })
 Dr:AddKeybind({ Title = "Teleport", Flag = "tp", Default = Enum.KeyCode.V, Mode = "Press", Callback = function() demo("Teleport", "Key pressed") end })
 

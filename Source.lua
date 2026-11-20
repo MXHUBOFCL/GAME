@@ -29,7 +29,7 @@ local MX = {
 	Options = {},
 	Themes = {},
 	ThemeOrder = {},
-	ThemeName = "Obsidian",
+	ThemeName = "Mono",
 	ThemeSweep = false,
 	TextScale = 1,
 	LogoId = 105865788976884,
@@ -185,14 +185,16 @@ MX:AddThemes({
 	Emerald = { Window = C3(14, 24, 19), Side = C3(10, 18, 14), Panel = C3(17, 29, 23), Card = C3(21, 36, 28), Element = C3(28, 47, 37), Hover = C3(37, 62, 49), Accent = C3(52, 211, 153), Text = C3(232, 250, 242), Sub = C3(122, 163, 145), Off = C3(40, 66, 54) },
 	Toxic = { Window = C3(12, 18, 10), Side = C3(8, 13, 7), Panel = C3(14, 21, 12), Card = C3(18, 27, 15), Element = C3(25, 38, 21), Hover = C3(34, 52, 29), Accent = C3(166, 255, 0), Text = C3(236, 250, 225), Sub = C3(130, 160, 110), Off = C3(38, 58, 32), OnAccent = C3(10, 18, 0) },
 	Noir = { Window = C3(10, 8, 9), Side = C3(5, 4, 5), Panel = C3(8, 6, 7), Card = C3(14, 10, 12), Element = C3(23, 17, 20), Hover = C3(36, 26, 31), Accent = C3(255, 92, 150), Text = C3(250, 240, 245), Sub = C3(150, 125, 136), Off = C3(44, 32, 38) },
-	["Mono"] = { Window = C3(12, 12, 12), Side = C3(7, 7, 7), Panel = C3(16, 16, 16), Card = C3(22, 22, 22), Element = C3(31, 31, 31), Hover = C3(43, 43, 43), Border = C3(64, 64, 64), Accent = C3(235, 235, 235), Text = C3(245, 245, 245), Sub = C3(140, 140, 140), Off = C3(50, 50, 50) },
+	["Graphite"] = { Window = C3(20, 22, 26), Side = C3(14, 16, 19), Panel = C3(24, 27, 32), Card = C3(29, 32, 38), Element = C3(38, 42, 50), Hover = C3(50, 55, 65), Border = C3(66, 72, 84), Accent = C3(122, 162, 255), Text = C3(238, 241, 248), Sub = C3(142, 150, 168), Off = C3(56, 62, 74) },
+	["Steel"] = { Window = C3(16, 18, 20), Side = C3(10, 12, 13), Panel = C3(20, 23, 25), Card = C3(25, 29, 31), Element = C3(34, 39, 42), Hover = C3(46, 52, 56), Border = C3(62, 70, 75), Accent = C3(150, 210, 190), Text = C3(236, 242, 240), Sub = C3(136, 150, 148), Off = C3(52, 60, 63) },
+	["Mono"] = { Window = C3(11, 11, 11), Side = C3(6, 6, 6), Panel = C3(15, 15, 15), Card = C3(20, 20, 20), Element = C3(28, 28, 28), Hover = C3(40, 40, 40), Border = C3(58, 58, 58), OnAccent = C3(12, 12, 12), Accent = C3(235, 235, 235), Text = C3(245, 245, 245), Sub = C3(140, 140, 140), Off = C3(50, 50, 50) },
 })
 do
-	local order = { "Obsidian", "Frost", "Violet", "Ocean", "Sunset", "Mono", "Rose", "Crimson", "Onyx", "Dark", "Darker", "Light", "Aqua", "Lagoon", "Amethyst", "Toxic", "Noir" }
+	local order = { "Mono", "Graphite", "Steel", "Obsidian", "Frost", "Violet", "Ocean", "Sunset", "Rose", "Crimson", "Onyx", "Dark", "Darker", "Light", "Aqua", "Lagoon", "Amethyst", "Toxic", "Noir" }
 	table.insert(order, "Emerald")
 	MX.ThemeOrder = order
 	for k, v in pairs(MX.Themes) do Theme[k] = nil end
-	for k, v in pairs(MX.Themes["Obsidian"]) do Theme[k] = v end
+	for k, v in pairs(MX.Themes["Mono"]) do Theme[k] = v end
 end
 
 local Gui
@@ -1508,7 +1510,17 @@ function MX:ShowPopup(f, anchor, opts)
 	end)
 end
 Overlay.InputBegan:Connect(function(i)
-	if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then MX:ClosePopup() end
+	if i.UserInputType ~= Enum.UserInputType.MouseButton1 and i.UserInputType ~= Enum.UserInputType.Touch then return end
+	local gp = GuiPos(i)
+	for idx = #PopStack, 1, -1 do
+		local fr = PopStack[idx].frame
+		local a, sz = fr.AbsolutePosition, fr.AbsoluteSize
+		if gp.X >= a.X and gp.X <= a.X + sz.X and gp.Y >= a.Y and gp.Y <= a.Y + sz.Y then
+			while #PopStack > idx do MX:ClosePopup() end
+			return
+		end
+	end
+	MX:CloseAllPopups()
 end)
 
 local function NewPopupFrame(w, h)
@@ -1668,7 +1680,7 @@ Scaled(NoteHolder)
 local NoteN = 0
 local NoteTypes = { Info = "Accent", Success = "Success", Warning = "Warning", Error = "Danger" }
 local NoteIcon = { Info = "info", Success = "check-circle", Warning = "alert-triangle", Error = "x-circle" }
-function MX:Notify(o)
+function MX:_NotifyLocal(o)
 	o = o or {}
 	local dead = false
 	local handle = { Update = function() end, Dismiss = function() end }
@@ -1737,6 +1749,62 @@ function MX:Notify(o)
 	end
 	return handle
 end
+MX.NotifyURL = "https://raw.githubusercontent.com/MXHUBOFCL/GAME/main/Notify.lua"
+
+function MX:_NotifyTheme()
+	local lib = MX._nl
+	if not lib then return end
+	pcall(function()
+		lib:SetTheme({ Card = Theme.Card, Element = Theme.Element, Border = Theme.Border, Text = Theme.Text, Sub = Theme.Sub, Info = Theme.Accent, Success = Theme.Success, Warning = Theme.Warning, Error = Theme.Danger, OnAccent = Theme.OnAccent })
+	end)
+end
+
+function MX:_NotifyLoad()
+	if MX._nl ~= nil then return MX._nl or nil end
+	if MX._nlLoading then
+		local t0 = os.clock()
+		while MX._nl == nil and os.clock() - t0 < 6 do task.wait() end
+		return MX._nl or nil
+	end
+	local url = MX.NotifyURL
+	if type(url) ~= "string" or url == "" then
+		MX._nl = false
+		return nil
+	end
+	MX._nlLoading = true
+	local ok, lib = pcall(function() return loadstring(game:HttpGet(url))() end)
+	MX._nlLoading = false
+	if ok and type(lib) == "table" and type(lib.Send) == "function" then
+		MX._nl = lib
+		MX:_NotifyTheme()
+	else
+		MX._nl = false
+	end
+	return MX._nl or nil
+end
+
+function MX:Notify(o)
+	o = o or {}
+	if not MX.NotifyEnabled or MX.Dead then return { Dismiss = function() end, Update = function() end } end
+	local lib = MX:_NotifyLoad()
+	if lib then
+		local kind = NoteTypes[o.Type] and o.Type or "Info"
+		local ok, h = pcall(function()
+			return lib:Send({
+				Type = kind,
+				Title = MX:T(tostring(o.Title or kind)),
+				Content = o.Content ~= nil and MX:T(tostring(o.Content)) or nil,
+				SubContent = o.SubContent,
+				Duration = o.Duration,
+				Buttons = o.Buttons,
+				Icon = MX:GetIcon(NoteIcon[kind]),
+			})
+		end)
+		if ok and h then return h end
+	end
+	return MX:_NotifyLocal(o)
+end
+
 for _, k in ipairs({ "Info", "Success", "Warning", "Error" }) do
 	MX[k] = function(self, title, content, dur)
 		return self:Notify({ Type = k, Title = title, Content = content, Duration = dur })
@@ -1902,6 +1970,7 @@ function MX:SetTheme(name, instant, keepOverride)
 		for _, it in ipairs(MX.Watermark.Items) do pcall(it.Update, it) end
 	end
 	pcall(function() MX:_KeyListRefresh() end)
+	pcall(function() MX:_NotifyTheme() end)
 end
 
 local LangCatalog = {
@@ -2336,7 +2405,7 @@ function MX:DeleteTheme(name)
 	MX.CustomThemes[name] = nil
 	MX.Themes[name] = nil
 	MX:_SaveThemes()
-	if MX.ThemeName == name then MX:SetTheme("Obsidian") end
+	if MX.ThemeName == name then MX:SetTheme("Mono") end
 	return true
 end
 function MX:SetAccent(c)
@@ -3109,22 +3178,23 @@ function Container:AddToggle(o, def, cb)
 		if type(def) == "function" then cb, def = def, nil end
 		o = { Title = o, Default = def, Callback = cb }
 	end
-	local switch = o.Style == "Switch"
+	local switch = o.Style == "Switch" or o.Switch == true
 	local keyed = o.Keybind ~= nil or o.Bind == true
 	local nExtra = (o.Color and 1 or 0) + (o.Options and 1 or 0)
 	local ctlW = (switch and 40 or 22) + nExtra * 28 + (keyed and 52 or 0)
 	local row, ctl, info = MakeRow(self, o, ctlW)
 	Titles(info, o)
 	local obj = { Type = "Toggle", Value = false }
-	local track, knob, check, checkProp
+	local track, knob, check, checkProp, tstroke
 	if switch then
 		track = Box(ctl, { Size = UDim2.fromOffset(38, 20), LayoutOrder = 4 }, nil, 10)
 		track.BackgroundTransparency = 0
+		tstroke = New("UIStroke", { Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, track)
 		knob = New("Frame", { Size = UDim2.fromOffset(14, 14), Position = UDim2.new(0, 3, 0.5, -7), BackgroundColor3 = C3(255, 255, 255), BorderSizePixel = 0 }, track)
 		New("UICorner", { CornerRadius = UDim.new(1, 0) }, knob)
 	else
 		track = Box(ctl, { Size = UDim2.fromOffset(20, 20), LayoutOrder = 4 }, nil, 5)
-		track.BackgroundTransparency = 0
+		tstroke = New("UIStroke", { Thickness = 1.5, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, track)
 		check = MakeIcon(track, "check", 14, "OnAccent")
 		check.AnchorPoint = Vector2.new(0.5, 0.5)
 		check.Position = UDim2.fromScale(0.5, 0.5)
@@ -3141,11 +3211,20 @@ function Container:AddToggle(o, def, cb)
 	local function paint(instant)
 		local on = obj.Value
 		local col = on and Theme.Accent or Theme.Off
-		if instant then
+		local scol = on and Theme.Accent or Theme.Border
+		local fill = (switch or on) and 0 or 1
+		if instant or not switch then
 			stop(track, "BackgroundColor3")
 			track.BackgroundColor3 = col
+		end
+		if instant then
+			stop(track, "BackgroundTransparency")
+			track.BackgroundTransparency = fill
+			tstroke.Color = scol
 		else
-			Tween(track, { BackgroundColor3 = col }, 0.15)
+			Tween(track, { BackgroundTransparency = fill }, 0.15)
+			Tween(tstroke, { Color = scol }, 0.15)
+			if switch then Tween(track, { BackgroundColor3 = col }, 0.15) end
 		end
 		if switch then
 			local p = on and UDim2.new(1, -17, 0.5, -7) or UDim2.new(0, 3, 0.5, -7)
@@ -3294,6 +3373,24 @@ local function ValueBox(parent, w)
 	local tb = New("TextBox", { BackgroundTransparency = 1, Size = UDim2.new(0, w or 80, 1, 0), AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, 0, 0, 0), Text = "", ClearTextOnFocus = false, Font = FONT.Med, TextSize = TS(13), TextXAlignment = RIGHT }, parent)
 	Bind(tb, { TextColor3 = "Sub" })
 	return tb
+end
+
+function Container:AddCheckbox(o, def, cb)
+	if type(o) == "string" then
+		if type(def) == "function" then cb, def = def, nil end
+		o = { Title = o, Default = def, Callback = cb }
+	end
+	o.Style = "Checkbox"
+	return self:AddToggle(o)
+end
+
+function Container:AddSwitch(o, def, cb)
+	if type(o) == "string" then
+		if type(def) == "function" then cb, def = def, nil end
+		o = { Title = o, Default = def, Callback = cb }
+	end
+	o.Style = "Switch"
+	return self:AddToggle(o)
 end
 
 function Container:AddSlider(o)
@@ -3530,8 +3627,7 @@ end
 function ListPopup(anchor, cfg)
 	local vals = cfg.Values
 	local itemH = Touch and 36 or 30
-	local showSearch = cfg.Search
-	if showSearch == nil then showSearch = true end
+	local showSearch = cfg.Search ~= false
 	local rows = math.max(1, math.min(#vals, Touch and 5 or 6))
 	local listH = rows * itemH + (rows - 1) * 2
 	local w = math.max(cfg.Width or 160, cfg.Multi and 190 or 130)
@@ -3680,57 +3776,7 @@ end
 
 function Container:AddDropdown(o)
 	if type(o) == "string" then o = { Title = o } end
-	if o.Multi then return self:AddMultiSelect(o) end
-	local row, ctl, info = MakeRow(self, o, 152)
-	Titles(info, o)
-	local btn, bst = Box(ctl, { Size = UDim2.new(0, 146, 0, Touch and 28 or 24) }, "Card", 5, "Border")
-	local txt = Lbl(btn, { Size = UDim2.new(1, -26, 1, 0), Position = UDim2.new(0, 8, 0, 0), TextSize = 13, TextTruncate = Enum.TextTruncate.AtEnd })
-	local darr = MakeIcon(btn, "chevron-down", 12, "Sub")
-	darr.AnchorPoint = Vector2.new(1, 0.5)
-	darr.Position = UDim2.new(1, -6, 0.5, 0)
-	local hit = Hit(btn, 4)
-	local obj = { Type = "Dropdown", Values = o.Values or {}, Value = nil }
-	local function paint()
-		txt.Text = obj.Value ~= nil and tostring(obj.Value) or (o.Placeholder or "Select")
-	end
-	function obj:Get() return self.Value end
-	function obj:Set(v, silent)
-		self.Value = v
-		paint()
-		if o.Flag then MX.Flags[o.Flag] = v end
-		if not silent and o.Callback then task.spawn(o.Callback, v) end
-	end
-	function obj:Refresh(values)
-		self.Values = values or {}
-		if self.Value ~= nil and not table.find(self.Values, self.Value) then
-			self.Value = nil
-			if o.Flag then MX.Flags[o.Flag] = nil end
-		end
-		paint()
-	end
-	function obj:Serialize() return self.Value end
-	function obj:Deserialize(v) if v ~= nil then self:Set(v) end end
-	local function open()
-		if obj.Locked then return end
-		ListPopup(btn, {
-			Values = obj.Values, Search = o.Search, Width = btn.AbsoluteSize.X / MX.Scale, Arrow = darr, Stroke = bst,
-			IsSel = function(v) return obj.Value == v end,
-			OnPick = function(v) obj:Set(v) end,
-		})
-	end
-	Tap(hit, open)
-	Hover(hit, btn, "Card", "Hover")
-	local rowHit = Hit(row, 2)
-	Hover(rowHit, row, "Element", "Hover")
-	Tap(rowHit, open)
-	if o.Default ~= nil then obj.Value = o.Default end
-	paint()
-	return Finish(self, o, obj, row)
-end
-
-function Container:AddMultiSelect(o)
-	if type(o) == "string" then o = { Title = o } end
-	o.Multi = nil
+	local multi = o.Multi == true
 	local row = Stacked(self, o)
 	local th = New("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, TS(14) + 4), LayoutOrder = 1 }, row)
 	List(th, 6, Enum.FillDirection.Horizontal, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
@@ -3740,64 +3786,114 @@ function Container:AddMultiSelect(o)
 	if o.Description and o.Description ~= "" then
 		Lbl(row, { Text = tostring(o.Description), TextSize = 12, Font = FONT.Reg, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY, TextWrapped = true, TextYAlignment = Enum.TextYAlignment.Top, LayoutOrder = 2 }, "Sub")
 	end
-	local field, fst = Box(row, { Size = UDim2.new(1, 0, 0, Touch and 32 or 28), LayoutOrder = 3 }, "Card", 6, "Border")
-	local txt = Lbl(field, { Size = UDim2.new(1, -34, 1, 0), Position = UDim2.new(0, 10, 0, 0), TextSize = 13, TextTruncate = Enum.TextTruncate.AtEnd }, false)
+	local field, fst = Box(row, { Size = UDim2.new(1, 0, 0, Touch and 34 or 30), LayoutOrder = 3 }, "Card", 6, "Border")
+	local txt = Lbl(field, { Size = UDim2.new(1, -62, 1, 0), Position = UDim2.new(0, 10, 0, 0), TextSize = 13, TextTruncate = Enum.TextTruncate.AtEnd }, false)
+	local count = Lbl(field, { Size = UDim2.new(0, 28, 1, 0), AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -26, 0, 0), TextSize = 11, Font = FONT.Bold, TextXAlignment = RIGHT, Visible = false }, "Sub")
 	local arr = MakeIcon(field, "chevron-down", 12, "Sub")
 	arr.AnchorPoint = Vector2.new(1, 0.5)
 	arr.Position = UDim2.new(1, -10, 0.5, 0)
 	local hit = Hit(field, 3)
 	Hover(hit, field, "Card", "Hover")
-	local obj = { Type = "MultiSelect", Values = o.Values or {}, Value = {} }
+	local obj = { Type = multi and "MultiSelect" or "Dropdown", Multi = multi, Values = o.Values or {}, Value = multi and {} or nil }
 	local function paint()
-		if #obj.Value == 0 then
-			txt.Text = o.Placeholder or "None"
-			txt.TextColor3 = Theme.Sub
+		if multi then
+			local n = #obj.Value
+			count.Visible = n > 1
+			count.Text = tostring(n)
+			if n == 0 then
+				txt.Text = o.Placeholder or "None"
+				txt.TextColor3 = Theme.Sub
+			else
+				local names = {}
+				for _, v in ipairs(obj.Value) do names[#names + 1] = tostring(v) end
+				txt.Text = table.concat(names, ", ")
+				txt.TextColor3 = Theme.Text
+			end
 		else
-			local names = {}
-			for _, v in ipairs(obj.Value) do names[#names + 1] = tostring(v) end
-			txt.Text = table.concat(names, ", ")
-			txt.TextColor3 = Theme.Text
+			count.Visible = false
+			if obj.Value ~= nil then
+				txt.Text = tostring(obj.Value)
+				txt.TextColor3 = Theme.Text
+			else
+				txt.Text = o.Placeholder or "Select"
+				txt.TextColor3 = Theme.Sub
+			end
 		end
 	end
 	Watch(field, paint)
 	function obj:Get() return self.Value end
 	function obj:Set(v, silent)
-		local list = {}
-		for _, x in ipairs(type(v) == "table" and v or { v }) do
-			if table.find(self.Values, x) and not table.find(list, x) then
-				if not o.Limit or #list < o.Limit then table.insert(list, x) end
+		if multi then
+			local list = {}
+			for _, x in ipairs(type(v) == "table" and v or { v }) do
+				if table.find(self.Values, x) and not table.find(list, x) then
+					if not o.Limit or #list < o.Limit then table.insert(list, x) end
+				end
 			end
+			self.Value = list
+		else
+			if type(v) == "table" then v = v[1] end
+			self.Value = v
 		end
-		self.Value = list
-		paint()
-		if o.Flag then MX.Flags[o.Flag] = list end
-		if not silent and o.Callback then task.spawn(o.Callback, list) end
-	end
-	function obj:Refresh(values)
-		self.Values = values or {}
-		self.Value = {}
 		paint()
 		if o.Flag then MX.Flags[o.Flag] = self.Value end
+		if not silent and o.Callback then task.spawn(o.Callback, self.Value) end
 	end
+	function obj:SelectAll(silent) if multi then self:Set(table.clone(self.Values), silent) end end
+	function obj:Clear(silent) self:Set(multi and {} or nil, silent) end
+	function obj:Refresh(values)
+		self.Values = values or {}
+		if multi then
+			local keep = {}
+			for _, v in ipairs(self.Value) do
+				if table.find(self.Values, v) then keep[#keep + 1] = v end
+			end
+			self.Value = keep
+		elseif self.Value ~= nil and not table.find(self.Values, self.Value) then
+			self.Value = nil
+		end
+		if o.Flag then MX.Flags[o.Flag] = self.Value end
+		paint()
+	end
+	obj.SetValues = obj.Refresh
 	function obj:Serialize() return self.Value end
-	function obj:Deserialize(v) self:Set(v) end
+	function obj:Deserialize(v)
+		if multi then
+			self:Set(v)
+		elseif v ~= nil then
+			self:Set(v)
+		end
+	end
 	Tap(hit, function()
 		if obj.Locked then return end
 		ListPopup(field, {
-			Values = obj.Values, Multi = true, Header = true, Search = o.Search, Width = field.AbsoluteSize.X / MX.Scale, Arrow = arr, Stroke = fst,
-			IsSel = function(v) return table.find(obj.Value, v) ~= nil end,
+			Values = obj.Values, Multi = multi, Header = multi, Search = true, Width = field.AbsoluteSize.X / MX.Scale, Arrow = arr, Stroke = fst,
+			IsSel = function(v)
+				if multi then return table.find(obj.Value, v) ~= nil end
+				return obj.Value == v
+			end,
 			OnPick = function(v)
-				local list = table.clone(obj.Value)
-				local i = table.find(list, v)
-				if i then table.remove(list, i) else table.insert(list, v) end
-				obj:Set(list)
+				if multi then
+					local list = table.clone(obj.Value)
+					local i = table.find(list, v)
+					if i then table.remove(list, i) else table.insert(list, v) end
+					obj:Set(list)
+				else
+					obj:Set(v)
+				end
 			end,
 			OnAll = function(all) obj:Set(all and table.clone(obj.Values) or {}) end,
 		})
 	end)
-	if o.Default then obj:Set(o.Default, true) end
+	if o.Default ~= nil then obj:Set(o.Default, true) end
 	paint()
 	return Finish(self, o, obj, row)
+end
+
+function Container:AddMultiSelect(o)
+	if type(o) == "string" then o = { Title = o } end
+	o.Multi = true
+	return self:AddDropdown(o)
 end
 
 function Container:AddTextbox(o)
@@ -3930,7 +4026,8 @@ function Container:AddImage(o)
 	local h = o.Height or 120
 	local card = Box(self.Content, { Size = UDim2.new(1, 0, 0, h), LayoutOrder = self:_Order(), ClipsDescendants = true }, "Element", 8)
 	local img = New("ImageLabel", { BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ScaleType = (o.Fit == "Fit" and Enum.ScaleType.Fit) or (o.Fit == "Stretch" and Enum.ScaleType.Stretch) or Enum.ScaleType.Crop, ZIndex = 1 }, card)
-	local fade = New("Frame", { AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 0, 1, 0), Size = UDim2.new(1, 0, 0, 56), BackgroundColor3 = C3(0, 0, 0), BorderSizePixel = 0, ZIndex = 2 }, card)
+	local hasText = (o.Title and o.Title ~= "") or (o.Description and o.Description ~= "")
+	local fade = New("Frame", { AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 0, 1, 0), Size = UDim2.new(1, 0, 0, 56), BackgroundColor3 = C3(0, 0, 0), BorderSizePixel = 0, ZIndex = 2, Visible = hasText }, card)
 	New("UIGradient", { Rotation = 90, Transparency = NumberSequence.new(1, 0.15) }, fade)
 	local t = Lbl(card, { Text = tostring(o.Title or ""), Position = UDim2.new(0, 12, 1, -42), Size = UDim2.new(1, -24, 0, 18), Font = FONT.Bold, TextSize = 15, ZIndex = 3 }, false)
 	t.TextColor3 = C3(255, 255, 255)
@@ -4742,20 +4839,21 @@ end
 
 local FXDefs = {}
 FXDefs.Snow = {
-	count = 30,
+	count = 40,
 	make = function(layer) return { f = fxFrame(layer, true) } end,
 	reset = function(p, w, h, init)
-		local sz = rnd(3, 6)
+		local d = math.random()
+		local sz = 2 + d * 4
 		p.f.Size = UDim2.fromOffset(sz, sz)
 		p.f.BackgroundColor3 = Theme.Text
-		p.f.BackgroundTransparency = rnd(0.45, 0.8)
+		p.f.BackgroundTransparency = 0.8 - d * 0.45
 		p.x, p.y = rnd(0, w), init and rnd(0, h) or -8
-		p.vy, p.vx, p.ph, p.t = rnd(22, 55), rnd(-8, 8), rnd(0, 6.28), 0
+		p.vy, p.vx, p.ph, p.t, p.sw = 16 + d * 44, rnd(-6, 6), rnd(0, 6.28), 0, 6 + d * 12
 	end,
 	step = function(p, dt, w, h)
 		p.t += dt
 		p.y += p.vy * dt
-		p.x += (p.vx + math.sin(p.t * 1.3 + p.ph) * 14) * dt
+		p.x += (p.vx + math.sin(p.t * 1.3 + p.ph) * p.sw) * dt
 		if p.y > h + 8 or p.x < -10 or p.x > w + 10 then FXDefs.Snow.reset(p, w, h, false) end
 		p.f.Position = UDim2.fromOffset(p.x, p.y)
 	end,
@@ -4765,6 +4863,7 @@ FXDefs.Rain = {
 	make = function(layer)
 		local f = fxFrame(layer, false)
 		f.Rotation = 12
+		New("UIGradient", { Rotation = 90, Transparency = NumberSequence.new(1, 0.1) }, f)
 		return { f = f }
 	end,
 	reset = function(p, w, h, init)
@@ -4829,20 +4928,37 @@ FXDefs.Petals = {
 	end,
 }
 FXDefs.Stars = {
-	count = 3,
-	make = function(layer)
-		local f = fxFrame(layer, false)
-		f.Rotation = 25
-		f.Visible = false
-		New("UIGradient", { Transparency = NumberSequence.new(1, 0) }, f)
-		return { f = f }
+	count = 24,
+	make = function(layer, i)
+		local shoot = i % 8 == 0
+		local f = fxFrame(layer, not shoot)
+		if shoot then
+			f.Rotation = 25
+			f.Visible = false
+			New("UIGradient", { Transparency = NumberSequence.new(1, 0) }, f)
+		end
+		return { f = f, shoot = shoot }
 	end,
 	reset = function(p, w, h, init)
-		p.active = false
-		p.f.Visible = false
-		p.wait = init and rnd(0, 3) or rnd(1.5, 4)
+		if p.shoot then
+			p.active = false
+			p.f.Visible = false
+			p.wait = init and rnd(0, 3) or rnd(1.5, 4)
+		else
+			local sz = rnd(1.5, 3.2)
+			p.f.Size = UDim2.fromOffset(sz, sz)
+			p.f.BackgroundColor3 = Theme.Text
+			p.x, p.y = rnd(0, w), rnd(0, h)
+			p.f.Position = UDim2.fromOffset(p.x, p.y)
+			p.ph, p.sp, p.t = rnd(0, 6.28), rnd(0.8, 2.4), 0
+		end
 	end,
 	step = function(p, dt, w, h)
+		if not p.shoot then
+			p.t += dt
+			p.f.BackgroundTransparency = 0.45 + 0.5 * (0.5 + 0.5 * math.sin(p.t * p.sp + p.ph))
+			return
+		end
 		if not p.active then
 			p.wait -= dt
 			if p.wait <= 0 then
@@ -4850,7 +4966,7 @@ FXDefs.Stars = {
 				p.age, p.life = 0, rnd(0.8, 1.3)
 				p.x, p.y = rnd(0, w * 0.8), rnd(-10, h * 0.4)
 				p.vx = rnd(240, 320)
-				p.f.Size = UDim2.fromOffset(rnd(50, 80), 2)
+				p.f.Size = UDim2.fromOffset(rnd(60, 90), 2)
 				p.f.BackgroundColor3 = Theme.Accent
 				p.f.Visible = true
 			end
@@ -4893,7 +5009,7 @@ function Window:SetEffect(name)
 	local n = math.max(1, math.floor(def.count * (Touch and 0.6 or 1) * (self.FXScale or 1) + 0.5))
 	self.FXParts = {}
 	for i = 1, n do
-		local p = def.make(self.FX)
+		local p = def.make(self.FX, i)
 		def.reset(p, w, h, true)
 		self.FXParts[i] = p
 	end
@@ -4907,7 +5023,8 @@ function Window:SetEffect(name)
 end
 function Window:GetEffect() return self.Effect or "None" end
 function Window:SetEffectIntensity(v)
-	self.FXScale = math.clamp(tonumber(v) or 1, 0.3, 3)
+	local map = { Low = 0.5, Medium = 1, High = 1.8 }
+	self.FXScale = map[v] or math.clamp(tonumber(v) or 1, 0.3, 3)
 	if self.Effect and self.Effect ~= "None" then self:SetEffect(self.Effect) end
 end
 function Window:SetStars(v) self:SetEffect(v and "Stars" or "None") end
@@ -5421,6 +5538,7 @@ function MX:Destroy()
 	MX.Dead = true
 	for _, c in ipairs(Conns) do pcall(function() c:Disconnect() end) end
 	if Blur then Blur:Destroy() Blur = nil end
+	if MX._nl then pcall(function() MX._nl:Destroy() end) end
 	if Gui then Gui:Destroy() end
 	if genv.MXUI == MX then genv.MXUI = nil end
 end
@@ -5443,17 +5561,20 @@ function MX:CreateWatermark(o)
 	o = o or {}
 	if MX.Watermark then MX.Watermark:Destroy() end
 	local wm = { Visible = o.Visible ~= false, Items = {} }
-	local frame = Box(FloatLayer, { Size = UDim2.new(0, 0, 0, 28), AutomaticSize = AX, Visible = wm.Visible }, "Card", 7, "Border")
+	local frame = Box(FloatLayer, { Size = UDim2.new(0, 0, 0, Touch and 34 or 36), AutomaticSize = AX, Visible = wm.Visible, ClipsDescendants = true }, "Card", 9, "Border")
 	GlassOn(frame, 0.2)
 	Scaled(frame)
 	Place(frame, o.Position or "TopRight", o.Margin or 10)
-	Pad(frame, 0, 10, 0, 6)
+	Pad(frame, 0, 14, 0, 9)
 	List(frame, 10, Enum.FillDirection.Horizontal, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
-	local logo = MXLogo(frame, 18)
+	local accent = New("Frame", { AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 0, 1, 0), Size = UDim2.new(1, 0, 0, 2), BorderSizePixel = 0, ZIndex = 5 }, frame)
+	Bind(accent, { BackgroundColor3 = "Accent" })
+	New("UIGradient", { Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.1), NumberSequenceKeypoint.new(1, 1) }) }, accent)
+	local logo = MXLogo(frame, 22)
 	logo.LayoutOrder = 0
 	local titleLbl
 	if o.Title ~= false then
-		titleLbl = Lbl(frame, { Text = tostring(o.Title or "MX HUB"), Size = UDim2.new(0, 0, 1, 0), AutomaticSize = AX, Font = FONT.Bold, TextSize = 13, LayoutOrder = 1 })
+		titleLbl = Lbl(frame, { Text = tostring(o.Title or "MX HUB"), Size = UDim2.new(0, 0, 1, 0), AutomaticSize = AX, Font = FONT.Bold, TextSize = 15, LayoutOrder = 1 })
 	end
 	Drag(frame, {
 		Begin = function()
@@ -5479,8 +5600,11 @@ function MX:CreateWatermark(o)
 			end
 		end
 		local item = { Name = name, Value = value, Key = key }
-		local l = Lbl(frame, { Size = UDim2.new(0, 0, 1, 0), AutomaticSize = AX, TextSize = 12, RichText = true, LayoutOrder = 10 + #self.Items }, "Text")
+		local order = 20 + #self.Items * 2
+		local sep = Box(frame, { Size = UDim2.fromOffset(1, 16), LayoutOrder = order - 1 }, "Border")
+		local l = Lbl(frame, { Size = UDim2.new(0, 0, 1, 0), AutomaticSize = AX, TextSize = 13, RichText = true, LayoutOrder = order }, "Text")
 		item.Label = l
+		item.Sep = sep
 		function item:Update()
 			local v = self.Value
 			if type(v) == "function" then
@@ -5492,9 +5616,10 @@ function MX:CreateWatermark(o)
 		end
 		function item:Set(v) self.Value = v self:Update() end
 		function item:SetName(n) self.Name = n self:Update() end
-		function item:SetVisible(v) l.Visible = v end
+		function item:SetVisible(v) l.Visible = v sep.Visible = v end
 		function item:Remove()
 			l:Destroy()
+			sep:Destroy()
 			local i = table.find(wm.Items, self)
 			if i then table.remove(wm.Items, i) end
 		end
@@ -5903,7 +6028,7 @@ function Window:AddSettingsTab(o)
 	table.insert(MX.CustomListeners, function() custom:Refresh(MX:GetCustomThemes()) end)
 	local fx = tab:AddSection({ Title = "Effects", Icon = "wand-2", Side = "Left" })
 	fx:AddDropdown({ Title = "Effect", Description = "Animation over the menu", Flag = "effect", Values = MX.EffectList, Default = self:GetEffect(), Search = false, Callback = function(n) self:SetEffect(n) end })
-	fx:AddSlider({ Title = "Intensity", Flag = "effect_intensity", Min = 0.5, Max = 2, Increment = 0.1, Default = self.FXScale or 1, Callback = function(v) self:SetEffectIntensity(v) end })
+	fx:AddDropdown({ Title = "Intensity", Description = "Low, Medium or High", Flag = "effect_intensity", Values = { "Low", "Medium", "High" }, Default = "Medium", Callback = function(v) self:SetEffectIntensity(v) end })
 	local cfg = tab:AddSection({ Title = "Configs", Icon = "folder", Side = "Right" })
 	cfg:AddConfigManager()
 	self._settingsTab = tab
