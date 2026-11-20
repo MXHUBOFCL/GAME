@@ -112,19 +112,35 @@ local Theme = {}
 local Reg, GlassReg = {}, {}
 MX.Theme = Theme
 
+function MX._NormalizeTheme(d)
+	local function ok(v) return typeof(v) == "Color3" end
+	d = type(d) == "table" and d or {}
+	if not ok(d.Window) then d.Window = ok(d.Panel) and d.Panel or (ok(d.Card) and d.Card or C3(14, 14, 18)) end
+	if not ok(d.Panel) then d.Panel = d.Window end
+	if not ok(d.Card) then d.Card = d.Panel end
+	if not ok(d.Accent) then d.Accent = C3(236, 60, 84) end
+	local light = Lum(d.Card) > 0.5
+	if not ok(d.Text) then d.Text = light and C3(20, 22, 30) or C3(240, 240, 246) end
+	if not ok(d.Side) then d.Side = d.Window:Lerp(C3(0, 0, 0), light and 0.05 or 0.3) end
+	if not ok(d.Element) then d.Element = d.Card:Lerp(d.Text, 0.08) end
+	if not ok(d.Hover) then d.Hover = d.Element:Lerp(d.Text, 0.1) end
+	if not ok(d.Border) then d.Border = d.Card:Lerp(d.Text, light and 0.3 or 0.38) end
+	if not ok(d.Sub) then d.Sub = d.Text:Lerp(d.Card, 0.45) end
+	if not ok(d.Off) then d.Off = d.Element:Lerp(d.Text, 0.12) end
+	if not ok(d.OnAccent) then d.OnAccent = Lum(d.Accent) > 0.62 and C3(20, 20, 24) or C3(255, 255, 255) end
+	if not ok(d.Success) then d.Success = C3(86, 214, 140) end
+	if not ok(d.Warning) then d.Warning = C3(245, 180, 66) end
+	if not ok(d.Danger) then d.Danger = C3(236, 80, 90) end
+	return d
+end
+
 function MX:AddThemes(t)
 	local names = {}
 	for name in pairs(t) do names[#names + 1] = name end
 	table.sort(names)
 	for _, name in ipairs(names) do
-		local d = t[name]
-		if not d.Border then
-			d.Border = d.Card:Lerp(d.Text, Lum(d.Card) > 0.5 and 0.3 or 0.38)
-		end
-		d.OnAccent = d.OnAccent or (Lum(d.Accent) > 0.62 and C3(20, 20, 24) or C3(255, 255, 255))
-		d.Success = d.Success or C3(86, 214, 140)
-		d.Warning = d.Warning or C3(245, 180, 66)
-		d.Danger = d.Danger or C3(236, 80, 90)
+		local d = MX._NormalizeTheme(t[name])
+		t[name] = d
 		if not MX.Themes[name] then table.insert(MX.ThemeOrder, name) end
 		MX.Themes[name] = d
 	end
@@ -359,12 +375,20 @@ end)
 
 local function Tap(hit, fn)
 	local act, sp, sf, sc0
-	local consumed, rejected = false, false
+	local last, rejectedAt = -1, -1
+	local function fire()
+		local n = os.clock()
+		if n - last < 0.15 then return end
+		last = n
+		fn()
+	end
+	local function scrolled()
+		return sf ~= nil and sc0 ~= nil and (sf.CanvasPosition - sc0).Magnitude > 2
+	end
 	hit.InputBegan:Connect(function(i)
 		local t = i.UserInputType
 		if t ~= Enum.UserInputType.MouseButton1 and t ~= Enum.UserInputType.Touch then return end
 		act = i
-		consumed, rejected = false, false
 		sp = Vector2.new(i.Position.X, i.Position.Y)
 		sf = hit.Parent
 		while sf and not sf:IsA("ScrollingFrame") do sf = sf.Parent end
@@ -374,28 +398,20 @@ local function Tap(hit, fn)
 		if not act then return end
 		local same = (i == act) or (i.UserInputType == Enum.UserInputType.MouseButton1 and act.UserInputType == i.UserInputType)
 		if not same then return end
+		local lim = act.UserInputType == Enum.UserInputType.Touch and 16 or 8
 		act = nil
-		local moved = (Vector2.new(i.Position.X, i.Position.Y) - sp).Magnitude > 10
-		local scrolled = sf and sc0 and (sf.CanvasPosition - sc0).Magnitude > 2
-		if moved or scrolled then
-			rejected = true
+		local moved = (Vector2.new(i.Position.X, i.Position.Y) - sp).Magnitude > lim
+		if moved or scrolled() then
+			rejectedAt = os.clock()
 			return
 		end
-		consumed = true
-		fn()
+		fire()
 	end)
 	hit.Activated:Connect(function()
 		task.defer(function()
-			if consumed then
-				consumed = false
-				return
-			end
-			if rejected then
-				rejected = false
-				return
-			end
-			if sf and sc0 and (sf.CanvasPosition - sc0).Magnitude > 2 then return end
-			fn()
+			if os.clock() - rejectedAt < 0.25 then return end
+			if scrolled() then return end
+			fire()
 		end)
 	end)
 end
@@ -1448,6 +1464,12 @@ local function PlacePopup(p)
 end
 function MX:ShowPopup(f, anchor, opts)
 	opts = opts or {}
+	for i = #PopStack, 1, -1 do
+		if PopStack[i].frame == f then
+			local old = table.remove(PopStack, i)
+			if old.conn then old.conn:Disconnect() end
+		end
+	end
 	local p = { frame = f, anchor = anchor, onClose = opts.OnClose, destroy = opts.Destroy, alignRight = opts.AlignRight, placement = opts.Placement }
 	PopStack[#PopStack + 1] = p
 	f.ZIndex = 10 + #PopStack
@@ -1800,6 +1822,8 @@ end
 function MX:SetTheme(name, instant, keepOverride)
 	local def = MX.Themes[name]
 	if not def then return end
+	def = MX._NormalizeTheme(def)
+	MX.Themes[name] = def
 	if not keepOverride then MX.AccentOverride = nil end
 	if MX.AccentOverride then
 		local c = {}
@@ -1832,8 +1856,16 @@ function MX:SetTheme(name, instant, keepOverride)
 	for k, v in pairs(def) do Theme[k] = v end
 	local function apply(list)
 		for _, e in ipairs(list) do
-			if e.o.Parent then
-				if sweep then Tween(e.o, { [e.p] = def[e.t] }, 0.2) else e.o[e.p] = def[e.t] end
+			local v = def[e.t]
+			if v ~= nil and e.o.Parent then
+				local st = Active[e.o]
+				if st and st[e.p] then
+					st[e.p]:Cancel()
+					st[e.p] = nil
+				end
+				pcall(function()
+					if sweep then Tween(e.o, { [e.p] = v }, 0.2) else e.o[e.p] = v end
+				end)
 			end
 		end
 	end
@@ -1848,6 +1880,10 @@ function MX:SetTheme(name, instant, keepOverride)
 		local ok, alive = pcall(MX.ThemeListeners[i], name)
 		if ok and alive == false then table.remove(MX.ThemeListeners, i) end
 	end
+	if MX.Watermark and MX.Watermark.Items then
+		for _, it in ipairs(MX.Watermark.Items) do pcall(it.Update, it) end
+	end
+	pcall(function() MX:_KeyListRefresh() end)
 end
 
 local LangCatalog = {
@@ -1971,7 +2007,6 @@ local LangID = {
 	["Mobile Button"] = "Tombol Mobile",
 	["Lock UI"] = "Kunci UI",
 	["Stops windows and buttons from being moved"] = "Mencegah jendela dan tombol dipindahkan",
-	["Copy Discord Invite"] = "Salin Undangan Discord",
 	["Copied"] = "Tersalin",
 	["Language"] = "Bahasa",
 	["Menu Scale"] = "Skala Menu",
@@ -2259,8 +2294,8 @@ function MX:LoadCustomThemes()
 	if not data then return end
 	for n, t in pairs(data) do
 		local d = DecTheme(t)
-		if d.Window and d.Accent and d.Text and d.Card then
-			if not d.OnAccent then d.OnAccent = Lum(d.Accent) > 0.62 and C3(20, 20, 24) or C3(255, 255, 255) end
+		if d.Accent and d.Text and (d.Window or d.Card) then
+			d = MX._NormalizeTheme(d)
 			MX.Themes[n] = d
 			MX.CustomThemes[n] = true
 		end
@@ -2638,8 +2673,8 @@ local function Spinner(parent, order)
 	end
 end
 
-function Container:AddButton(o)
-	if type(o) == "string" then o = { Title = o } end
+function Container:AddButton(o, cb)
+	if type(o) == "string" then o = { Title = o, Callback = type(cb) == "function" and cb or nil } end
 	local row, ctl, info = MakeRow(self, o, 24)
 	Titles(info, o)
 	local chev = MakeIcon(ctl, "chevron-right", 14, "Sub")
@@ -3030,8 +3065,11 @@ function Container:AddColorPicker(o)
 	return cp
 end
 
-function Container:AddToggle(o)
-	if type(o) == "string" then o = { Title = o } end
+function Container:AddToggle(o, def, cb)
+	if type(o) == "string" then
+		if type(def) == "function" then cb, def = def, nil end
+		o = { Title = o, Default = def, Callback = cb }
+	end
 	local switch = o.Style == "Switch"
 	local keyed = o.Keybind ~= nil or o.Bind == true
 	local nExtra = (o.Color and 1 or 0) + (o.Options and 1 or 0)
@@ -3054,20 +3092,45 @@ function Container:AddToggle(o)
 		checkProp = check:IsA("ImageLabel") and "ImageTransparency" or "TextTransparency"
 		check[checkProp] = 1
 	end
+	local function stop(inst, prop)
+		local st = Active[inst]
+		if st and st[prop] then
+			st[prop]:Cancel()
+			st[prop] = nil
+		end
+	end
 	local function paint(instant)
 		local on = obj.Value
 		local col = on and Theme.Accent or Theme.Off
-		if instant then track.BackgroundColor3 = col else Tween(track, { BackgroundColor3 = col }, 0.15) end
+		if instant then
+			stop(track, "BackgroundColor3")
+			track.BackgroundColor3 = col
+		else
+			Tween(track, { BackgroundColor3 = col }, 0.15)
+		end
 		if switch then
 			local p = on and UDim2.new(1, -17, 0.5, -7) or UDim2.new(0, 3, 0.5, -7)
-			if instant then knob.Position = p else Tween(knob, { Position = p }, 0.15) end
+			if instant then
+				stop(knob, "Position")
+				knob.Position = p
+			else
+				Tween(knob, { Position = p }, 0.15)
+			end
 		else
-			if instant then check[checkProp] = on and 0 or 1 else Tween(check, { [checkProp] = on and 0 or 1 }, 0.12) end
+			if instant then
+				stop(check, checkProp)
+				check[checkProp] = on and 0 or 1
+			else
+				Tween(check, { [checkProp] = on and 0 or 1 }, 0.12)
+			end
 		end
 	end
 	Watch(track, function() paint(true) end)
 	local cb = o.Callback
 	function obj:Get() return self.Value end
+	function obj:GetValue() return self.Value end
+	function obj:Toggle() self:Set(not self.Value) end
+	function obj:SetValue(v, silent) self:Set(v, silent) end
 	function obj:Set(v, silent)
 		v = v and true or false
 		if self.Value == v then return end
@@ -3083,9 +3146,13 @@ function Container:AddToggle(o)
 	hit.AnchorPoint = Vector2.new(0.5, 0.5)
 	hit.Position = UDim2.fromScale(0.5, 0.5)
 	hit.Size = UDim2.new(0, (switch and 38 or 20) + 10, 0, RH)
-	Tap(hit, function()
+	local function flip()
 		if not obj.Locked then obj:Set(not obj.Value) end
-	end)
+	end
+	Tap(hit, flip)
+	local rowHit = Hit(row, 2)
+	Hover(rowHit, row, "Element", "Hover")
+	Tap(rowHit, flip)
 	if o.Color then
 		local co = o.Color
 		if typeof(co) == "Color3" then co = { Default = co } end
@@ -3164,7 +3231,7 @@ function Container:AddToggle(o)
 			}
 		end
 	end
-	if o.Default then obj.Value = true end
+	if o.Default == true or o.Value == true or o.State == true then obj.Value = true end
 	paint(true)
 	return Finish(self, o, obj, row)
 end
@@ -3260,8 +3327,7 @@ function Container:AddSlider(o)
 			if i.UserInputType == Enum.UserInputType.Touch then
 				local c = knob.AbsolutePosition + knob.AbsoluteSize / 2
 				local p = GuiPos(i)
-				if math.abs(p.X - c.X) > 28 or math.abs(p.Y - c.Y) > 28 then return false end
-				touchOff = c.X - p.X
+				if math.abs(p.X - c.X) <= 28 and math.abs(p.Y - c.Y) <= 28 then touchOff = c.X - p.X end
 			end
 			if i.UserInputType == Enum.UserInputType.MouseButton1 and UIS:IsKeyDown(Enum.KeyCode.LeftControl) then
 				fine = o.FineFactor or 0.1
@@ -3337,18 +3403,29 @@ function Container:AddNumberInput(o)
 			if obj.Locked then return end
 			local held = true
 			local conn
+			local touch = i.UserInputType == Enum.UserInputType.Touch
+			local origin = Vector2.new(i.Position.X, i.Position.Y)
+			local step = function() obj:Set(obj.Value + dir * inc * (UIS:IsKeyDown(Enum.KeyCode.LeftShift) and 10 or 1)) end
+			local stepped = false
 			conn = UIS.InputEnded:Connect(function(e)
 				if e == i or e.UserInputType == Enum.UserInputType.MouseButton1 then
 					held = false
 					conn:Disconnect()
+					if touch and not stepped and (Vector2.new(e.Position.X, e.Position.Y) - origin).Magnitude < 14 then
+						stepped = true
+						step()
+					end
 				end
 			end)
 			task.spawn(function()
-				local step = function() obj:Set(obj.Value + dir * inc * (UIS:IsKeyDown(Enum.KeyCode.LeftShift) and 10 or 1)) end
-				step()
+				if not touch then
+					stepped = true
+					step()
+				end
 				local t0 = os.clock()
 				while held and os.clock() - t0 < 0.4 do task.wait() end
 				while held do
+					stepped = true
 					step()
 					task.wait(0.06)
 				end
@@ -3539,21 +3616,27 @@ function Container:AddDropdown(o)
 	end
 	function obj:Refresh(values)
 		self.Values = values or {}
-		self.Value = nil
+		if self.Value ~= nil and not table.find(self.Values, self.Value) then
+			self.Value = nil
+			if o.Flag then MX.Flags[o.Flag] = nil end
+		end
 		paint()
-		if o.Flag then MX.Flags[o.Flag] = nil end
 	end
 	function obj:Serialize() return self.Value end
 	function obj:Deserialize(v) if v ~= nil then self:Set(v) end end
-	Tap(hit, function()
+	local function open()
 		if obj.Locked then return end
 		ListPopup(btn, {
 			Values = obj.Values, Search = o.Search, Width = btn.AbsoluteSize.X / MX.Scale, Arrow = darr, Stroke = bst,
 			IsSel = function(v) return obj.Value == v end,
 			OnPick = function(v) obj:Set(v) end,
 		})
-	end)
+	end
+	Tap(hit, open)
 	Hover(hit, btn, "Card", "Hover")
+	local rowHit = Hit(row, 2)
+	Hover(rowHit, row, "Element", "Hover")
+	Tap(rowHit, open)
 	if o.Default ~= nil then obj.Value = o.Default end
 	paint()
 	return Finish(self, o, obj, row)
@@ -3895,6 +3978,7 @@ function Container:AddConfigManager(o)
 			r.label.TextColor3 = on and Theme.Accent or Theme.Text
 		end
 	end
+	Watch(box, paintRows)
 	local function refresh()
 		for _, c in ipairs(sc:GetChildren()) do
 			if c:IsA("GuiObject") then c:Destroy() end
@@ -4117,8 +4201,13 @@ local function NewSection(parent, base, o)
 			arrow = MakeIcon(cb, "chevron-down", 12, "Sub")
 			arrow.AnchorPoint = Vector2.new(0.5, 0.5)
 			arrow.Position = UDim2.fromScale(0.5, 0.5)
-			local ch = Hit(header, 2)
-			Tap(ch, function() sec:SetCollapsed(not sec.Collapsed) end)
+			local function flip() sec:SetCollapsed(not sec.Collapsed) end
+			Tap(Hit(header, 2), flip)
+			local cbHit = Hit(cb, 5)
+			cbHit.AnchorPoint = Vector2.new(0.5, 0.5)
+			cbHit.Position = UDim2.fromScale(0.5, 0.5)
+			cbHit.Size = UDim2.fromOffset(38, HH)
+			Tap(cbHit, flip)
 		end
 		if o.Toggle then
 			swTrack = Box(right, { Size = UDim2.fromOffset(34, 18), LayoutOrder = 1, BackgroundTransparency = 0 }, nil, 9)
@@ -4475,9 +4564,12 @@ function Window:IsSidebarCollapsed() return self.Collapsed end
 
 function Window:Toggle(state)
 	if state == nil then state = not self.Open end
-	if state == self.Open then return end
+	state = state and true or false
+	if state == self.Open and (not state or self.Main.Visible) then return end
 	self.Open = state
-	MX:CloseAllPopups()
+	self._tg = (self._tg or 0) + 1
+	local id = self._tg
+	pcall(function() MX:CloseAllPopups() end)
 	Tip.Visible = false
 	if state then
 		self.Main.Visible = true
@@ -4485,13 +4577,14 @@ function Window:Toggle(state)
 		Tween(self.ScaleObj, { Scale = MX.Scale }, 0.1)
 	else
 		Tween(self.ScaleObj, { Scale = MX.Scale * 0.97 }, 0.08)
-		task.delay(0.08, function()
-			if not self.Open then self.Main.Visible = false end
+		task.delay(0.1, function()
+			if self._tg == id and not self.Open then self.Main.Visible = false end
 		end)
 	end
 	self:_UpdateMobileBtn()
 	MX:_UpdateBlur()
 end
+function Window:IsOpen() return self.Open end
 function Window:Show() self:Toggle(true) end
 function Window:Hide() self:Toggle(false) end
 function Window:SetTitle(t) if self.TitleLabel then self.TitleLabel.Text = tostring(t) end end
@@ -4529,7 +4622,7 @@ function MX:Dialog(o) if MX.Window then MX.Window:Dialog(o) end end
 
 local function rnd(a, b) return a + math.random() * (b - a) end
 local function fxFrame(layer, round)
-	local f = New("Frame", { BorderSizePixel = 0, ZIndex = 0 }, layer)
+	local f = New("Frame", { BorderSizePixel = 0, ZIndex = 1 }, layer)
 	if round then New("UICorner", { CornerRadius = UDim.new(1, 0) }, f) end
 	return f
 end
@@ -5015,12 +5108,6 @@ function MX:CreateWindow(o)
 	gr.kl = gearMenu:AddToggle({ Title = "Keybind List", Flag = "keybind_list", Style = "Switch", Callback = function(v) if MX.KeyList then MX.KeyList:SetVisible(v) end end })
 	gr.mob = gearMenu:AddToggle({ Title = "Mobile Button", Flag = "mobile_button", Style = "Switch", Callback = function(v) win:SetMobileButton(v) end })
 	gr.lock = gearMenu:AddToggle({ Title = "Lock UI", Description = "Stops windows and buttons from being moved", Flag = "ui_locked", Style = "Switch", Callback = function(v) MX:SetLocked(v) end })
-	if MX.Discord then
-		gearMenu:AddButton({ Title = "Copy Discord Invite", Callback = function()
-			local ok = Copy(MX.Discord)
-			MX:Notify({ Type = ok and "Success" or "Warning", Title = ok and "Copied" or "Not Supported", Content = ok and MX.Discord or "Your executor has no clipboard.", Duration = 2 })
-		end })
-	end
 	Tap(gh, function()
 		gr.glass:Set(MX.Glass, true)
 		gr.wm:Set(MX.Watermark ~= nil and MX.Watermark.Visible or false, true)
@@ -5093,7 +5180,7 @@ function MX:CreateWindow(o)
 	GlassOn(content, 0.25)
 	RoundBox(content, "Panel", 0.25, "right")
 	win.Content = content
-	local fx = New("Frame", { Name = "FX", BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.fromScale(1, 1), ClipsDescendants = true, ZIndex = 0, Visible = false }, content)
+	local fx = New("Frame", { Name = "FX", BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.fromScale(1, 1), ClipsDescendants = true, ZIndex = 3, Visible = false }, content)
 	New("UICorner", { CornerRadius = UDim.new(0, 10) }, fx)
 	win.FX = fx
 	win.FXScale = 1
@@ -5187,7 +5274,7 @@ function Window:SetMobileButton(on, opts)
 			if not dragging then return end
 			if input.UserInputType == Enum.UserInputType.MouseMovement or (input.UserInputType == Enum.UserInputType.Touch and input == draginput) then
 				local delta = input.Position - dragstart
-				if not moved and delta.Magnitude < 6 then return end
+				if not moved and delta.Magnitude < 12 then return end
 				moved = true
 				btn.Position = UDim2.new(startpos.X.Scale, startpos.X.Offset + delta.X, startpos.Y.Scale, startpos.Y.Offset + delta.Y)
 				clampButton()
@@ -5381,7 +5468,7 @@ function MX:CreateKeybindList(o)
 		end
 		self.Count = #parts
 		frame.Visible = self.Visible and #parts > 0
-		local sig = table.concat(parts, ";") .. tostring(self.OnlyActive) .. MX.ThemeName
+		local sig = table.concat(parts, ";") .. tostring(self.OnlyActive) .. MX.ThemeName .. tostring(Theme.Accent)
 		if sig == self._sig then return end
 		self._sig = sig
 		for _, c in ipairs(frame:GetChildren()) do
@@ -5702,7 +5789,7 @@ function Window:AddSettingsTab(o)
 	end })
 	table.insert(MX.CustomListeners, function() custom:Refresh(MX:GetCustomThemes()) end)
 	local fx = tab:AddSection({ Title = "Effects", Icon = "wand-2", Side = "Left" })
-	fx:AddDropdown({ Title = "Effect", Description = "Animation behind the menu", Flag = "effect", Values = MX.EffectList, Default = self:GetEffect(), Search = false, Callback = function(n) self:SetEffect(n) end })
+	fx:AddDropdown({ Title = "Effect", Description = "Animation over the menu", Flag = "effect", Values = MX.EffectList, Default = self:GetEffect(), Search = false, Callback = function(n) self:SetEffect(n) end })
 	fx:AddSlider({ Title = "Intensity", Flag = "effect_intensity", Min = 0.5, Max = 2, Increment = 0.1, Default = self.FXScale or 1, Callback = function(v) self:SetEffectIntensity(v) end })
 	local cfg = tab:AddSection({ Title = "Configs", Icon = "folder", Side = "Right" })
 	cfg:AddConfigManager()

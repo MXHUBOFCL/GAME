@@ -1,4 +1,4 @@
-local MX = loadstring(game:HttpGet("https://raw.githubusercontent.com/MXHUBOFCL/GAME/main/Source.lua"))()
+local MX = loadstring(game:HttpGet("https://raw.githubusercontent.com/YOUR_USER/YOUR_REPO/main/Source.lua"))()
 
 local C = Color3.fromRGB
 MX:AddThemes({
@@ -24,6 +24,7 @@ local Window = MX:CreateWindow({
 	TabWidth = 170,
 	Theme = "Obsidian",
 	MobileButton = "Auto",
+	Effect = "Stars",
 })
 
 local Watermark = MX:CreateWatermark({ Title = "MX HUB" })
@@ -65,6 +66,11 @@ Notes:AddButton({ Title = "With Buttons", Callback = function()
 		{ Text = "Decline" },
 	} })
 end })
+
+local Basic = Elements:AddSection({ Title = "Basic Toggles", Icon = "toggle-right" })
+Basic:AddToggle("Simple Toggle", false, function(v) demo("Simple Toggle", tostring(v)) end)
+Basic:AddToggle({ Title = "Checkbox Toggle", Description = "Tap anywhere on the row", Flag = "basic_check", Default = true, Callback = function(v) demo("Checkbox", tostring(v)) end })
+Basic:AddToggle({ Title = "Switch Toggle", Flag = "basic_switch", Style = "Switch", Callback = function(v) demo("Switch", tostring(v)) end })
 
 local Extras = Elements:AddSection({ Title = "Toggle Extras", Icon = "settings" })
 Extras:AddToggle({ Title = "Boxes", Description = "Color swatch and a gear with options", Flag = "boxes", Options = {
