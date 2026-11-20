@@ -1,4 +1,4 @@
-local MX = loadstring(game:HttpGet("https://raw.githubusercontent.com/MXHUBOFCL/GAME/main/Source.lua"))()
+local MX = loadstring(game:HttpGet("https://raw.githubusercontent.com/YOUR_USER/YOUR_REPO/main/Source.lua"))()
 
 local C = Color3.fromRGB
 MX:AddThemes({
@@ -7,6 +7,11 @@ MX:AddThemes({
 })
 
 MX.Discord = "https://discord.gg/G7FCTC2mEk"
+
+MX:AddTranslations("Indonesia", {
+	["Welcome"] = "Selamat Datang", ["Labels and Progress"] = "Label dan Progres", ["Notifications"] = "Notifikasi",
+	["Run Progress"] = "Jalankan Progres", ["Elements"] = "Elemen", ["Locked Toggle"] = "Toggle Terkunci",
+})
 
 local function demo(title, text)
 	MX:Info(title, text or "Example only, nothing happens.", 2)

@@ -241,6 +241,48 @@ local function Box(parent, props, tok, rad, stroke)
 	return f, st
 end
 
+MX.Lang = { Current = "English", List = { "English", "Indonesia" }, Dict = {}, Codes = { English = "en", Indonesia = "id" }, Listeners = {} }
+local TrReg, TrKeys, TrPrune, TrQueued = {}, {}, 500, false
+function MX:T(key)
+	local d = MX.Lang.Dict[MX.Lang.Current]
+	local v = d and d[key]
+	return v or key
+end
+local function Tr(o, key, prop)
+	local e = { o = o, p = prop or "Text", k = key }
+	TrReg[#TrReg + 1] = e
+	if key ~= "" then TrKeys[key] = true end
+	o[e.p] = MX:T(key)
+	if #TrReg > TrPrune then
+		local w = 0
+		for i = 1, #TrReg do
+			local x = TrReg[i]
+			if x.o.Parent and x.o:IsDescendantOf(Gui) then
+				w += 1
+				TrReg[w] = x
+			end
+		end
+		for i = #TrReg, w + 1, -1 do TrReg[i] = nil end
+		TrPrune = math.max(500, w * 2)
+	end
+	if MX.Lang.Current ~= "English" and key ~= "" and not TrQueued then
+		local d = MX.Lang.Dict[MX.Lang.Current]
+		if not (d and d[key]) then
+			TrQueued = true
+			task.delay(1.2, function()
+				TrQueued = false
+				MX:_TranslateMissing(MX.Lang.Current)
+			end)
+		end
+	end
+	return e
+end
+local function TrSet(e, key)
+	e.k = key
+	if key ~= "" then TrKeys[key] = true end
+	e.o[e.p] = MX:T(key)
+end
+
 local function Lbl(parent, props, tok)
 	props = props or {}
 	props.BackgroundTransparency = 1
@@ -249,8 +291,11 @@ local function Lbl(parent, props, tok)
 	props.TextSize = TS(props.TextSize or 14)
 	if props.TextXAlignment == nil then props.TextXAlignment = LEFT end
 	if props.Text == nil then props.Text = "" end
+	local tr = props.Tr
+	props.Tr = nil
 	local l = New("TextLabel", props, parent)
 	if tok ~= false then Bind(l, { TextColor3 = tok or "Text" }) end
+	if tr then return l, Tr(l, props.Text) end
 	return l
 end
 
@@ -312,11 +357,53 @@ Conn(UIS.InputChanged, function(i)
 	end
 end)
 
+local function Tap(hit, fn)
+	local act, sp, sf, sc0
+	local consumed, rejected = false, false
+	hit.InputBegan:Connect(function(i)
+		local t = i.UserInputType
+		if t ~= Enum.UserInputType.MouseButton1 and t ~= Enum.UserInputType.Touch then return end
+		act = i
+		consumed, rejected = false, false
+		sp = Vector2.new(i.Position.X, i.Position.Y)
+		sf = hit.Parent
+		while sf and not sf:IsA("ScrollingFrame") do sf = sf.Parent end
+		sc0 = sf and sf.CanvasPosition or nil
+	end)
+	hit.InputEnded:Connect(function(i)
+		if not act then return end
+		local same = (i == act) or (i.UserInputType == Enum.UserInputType.MouseButton1 and act.UserInputType == i.UserInputType)
+		if not same then return end
+		act = nil
+		local moved = (Vector2.new(i.Position.X, i.Position.Y) - sp).Magnitude > 10
+		local scrolled = sf and sc0 and (sf.CanvasPosition - sc0).Magnitude > 2
+		if moved or scrolled then
+			rejected = true
+			return
+		end
+		consumed = true
+		fn()
+	end)
+	hit.Activated:Connect(function()
+		task.defer(function()
+			if consumed then
+				consumed = false
+				return
+			end
+			if rejected then
+				rejected = false
+				return
+			end
+			if sf and sc0 and (sf.CanvasPosition - sc0).Magnitude > 2 then return end
+			fn()
+		end)
+	end)
+end
+
 local function Drag(handle, o)
 	handle.InputBegan:Connect(function(input)
 		local t = input.UserInputType
 		if t ~= Enum.UserInputType.MouseButton1 and t ~= Enum.UserInputType.Touch then return end
-		if o.Begin and o.Begin(input) == false then return end
 		do
 			local ins = Inset()
 			if ins.Y > 0 then
@@ -327,6 +414,7 @@ local function Drag(handle, o)
 				if a and not b then PtrD = Vector2.zero elseif b and not a then PtrD = ins end
 			end
 		end
+		if o.Begin and o.Begin(input) == false then return end
 		local originG = GuiPos(input)
 		if o.Lock then MX:ScrollLock(true) end
 		local cm, ce
@@ -1262,7 +1350,7 @@ local function MakeIcon(parent, icon, size, tok)
 	return Lbl(parent, { Text = g, Size = UDim2.fromOffset(size, size), TextSize = size - 3, TextXAlignment = CENTER, Font = FONT.Bold }, tok)
 end
 
-local BadgeCols = { NEW = "Accent", BETA = "Warning", HOT = "Danger", FIXED = "Success" }
+local BadgeCols = { NEW = "Accent", BETA = "Warning", HOT = "Danger", FIXED = "Success", PREMIUM = "Warning" }
 local function MakeBadge(parent, badge, order)
 	local text, col = badge, nil
 	if type(badge) == "table" then text, col = badge.Text, badge.Color end
@@ -1339,6 +1427,16 @@ local function PlacePopup(p)
 	local as = a.AbsoluteSize
 	local sz, vp = f.AbsoluteSize, Overlay.AbsoluteSize
 	local x, y = ab.X, ab.Y + as.Y + 4
+	if p.placement == "RightBottom" or p.placement == "Right" then
+		x = ab.X + as.X + 6
+		if x + sz.X > vp.X - 6 then x = ab.X - sz.X - 6 end
+		y = p.placement == "RightBottom" and (ab.Y + as.Y - sz.Y) or ab.Y
+		if y + sz.Y > vp.Y - 6 then y = vp.Y - sz.Y - 6 end
+		if y < 6 then y = 6 end
+		if x < 6 then x = 6 end
+		f.Position = UDim2.fromOffset(math.floor(x + 0.5), math.floor(y + 0.5))
+		return
+	end
 	if p.alignRight then x = ab.X + as.X - sz.X end
 	if x + sz.X > vp.X - 6 then x = vp.X - sz.X - 6 end
 	if x < 6 then x = 6 end
@@ -1350,7 +1448,7 @@ local function PlacePopup(p)
 end
 function MX:ShowPopup(f, anchor, opts)
 	opts = opts or {}
-	local p = { frame = f, anchor = anchor, onClose = opts.OnClose, destroy = opts.Destroy, alignRight = opts.AlignRight }
+	local p = { frame = f, anchor = anchor, onClose = opts.OnClose, destroy = opts.Destroy, alignRight = opts.AlignRight, placement = opts.Placement }
 	PopStack[#PopStack + 1] = p
 	f.ZIndex = 10 + #PopStack
 	f.AnchorPoint = Vector2.zero
@@ -1445,11 +1543,16 @@ local function MakeBind(name, mode, key, fire, active)
 end
 
 local MenuKeys = { Enum.KeyCode.Insert, Enum.KeyCode.RightShift }
+MX.MenuKeyCode = Enum.KeyCode.RightShift
 function MX:SetMenuKey(k)
 	MenuKeys = { Enum.KeyCode.Insert }
 	if k and k ~= Enum.KeyCode.Insert then table.insert(MenuKeys, k) end
+	MX.MenuKeyCode = k
 end
-function MX:_SetMenuKeys(t) MenuKeys = t end
+function MX:_SetMenuKeys(t)
+	MenuKeys = t
+	MX.MenuKeyCode = t[2] or t[1]
+end
 
 local function KeyMatch(input, key)
 	if not key then return false end
@@ -1535,8 +1638,8 @@ function MX:Notify(o)
 	local gl = MakeIcon(head, NoteIcon[kind], 16, NoteTypes[kind])
 	gl.AnchorPoint = Vector2.new(0, 0.5)
 	gl.Position = UDim2.new(0, 0, 0.5, 0)
-	local title = Lbl(head, { Text = tostring(o.Title or kind), Position = UDim2.new(0, 22, 0, 0), Size = UDim2.new(1, -22, 1, 0), Font = FONT.Bold, TextSize = 14, TextTruncate = Enum.TextTruncate.AtEnd })
-	local content = Lbl(body, { Text = tostring(o.Content or ""), Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY, TextWrapped = true, TextSize = 13, Font = FONT.Reg, TextYAlignment = Enum.TextYAlignment.Top, LayoutOrder = 2, Visible = (o.Content ~= nil and o.Content ~= "") }, "Sub")
+	local title = Lbl(head, { Text = MX:T(tostring(o.Title or kind)), Position = UDim2.new(0, 22, 0, 0), Size = UDim2.new(1, -22, 1, 0), Font = FONT.Bold, TextSize = 14, TextTruncate = Enum.TextTruncate.AtEnd })
+	local content = Lbl(body, { Text = MX:T(tostring(o.Content or "")), Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY, TextWrapped = true, TextSize = 13, Font = FONT.Reg, TextYAlignment = Enum.TextYAlignment.Top, LayoutOrder = 2, Visible = (o.Content ~= nil and o.Content ~= "") }, "Sub")
 	local sub = Lbl(body, { Text = tostring(o.SubContent or ""), Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY, TextWrapped = true, TextSize = 12, Font = FONT.Reg, TextYAlignment = Enum.TextYAlignment.Top, LayoutOrder = 3, Visible = o.SubContent ~= nil }, "Sub")
 	local function dismiss()
 		if dead then return end
@@ -1552,14 +1655,14 @@ function MX:Notify(o)
 			Pad(btn, 0, 12, 0, 12)
 			Lbl(btn, { Text = b.Text or b.Title or "OK", Size = UDim2.new(0, 0, 1, 0), AutomaticSize = AX, TextSize = 13, TextXAlignment = CENTER }, b.Primary and "OnAccent" or "Text")
 			local h = Hit(btn)
-			h.Activated:Connect(function()
+			Tap(h, function()
 				dismiss()
 				if b.Callback then task.spawn(b.Callback) end
 			end)
 		end
 	else
 		local h = Hit(card, 5)
-		h.Activated:Connect(dismiss)
+		Tap(h, dismiss)
 	end
 	local dur = tonumber(o.Duration) or 4
 	local timer = New("Frame", { BorderSizePixel = 0, AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 0, 1, 0), Size = UDim2.new(1, 0, 0, 2), ZIndex = 3 }, card)
@@ -1625,6 +1728,8 @@ function MX:LoadConfig(name)
 		local obj = MX.Options[flag]
 		if obj and obj.Deserialize then pcall(obj.Deserialize, obj, v) end
 	end
+	MX.LoadedConfig = name
+	MX._lastSnap = nil
 	return true
 end
 function MX:ListConfigs()
@@ -1666,26 +1771,6 @@ function MX:RefreshConfigs()
 	local l = MX:ListConfigs()
 	for _, f in ipairs(MX.ConfigListeners) do pcall(f, l) end
 end
-function MX:SetAutoLoad(name)
-	if not FS.ok() then return end
-	EnsureFolder(MX.ConfigFolder)
-	pcall(writefile, MX.ConfigFolder .. "/autoload.txt", name or "")
-end
-function MX:GetAutoLoad()
-	if not (FS.ok() and isfile) then return nil end
-	local p = MX.ConfigFolder .. "/autoload.txt"
-	if isfile(p) then
-		local ok, s = pcall(readfile, p)
-		if ok and s ~= "" then return s end
-	end
-	return nil
-end
-function MX:LoadAutoConfig()
-	local n = MX:GetAutoLoad()
-	if n then return MX:LoadConfig(n) end
-	return false
-end
-
 MX.Utils.Copy = function(t) return Copy(t) end
 
 function MX:_UpdateBlur() end
@@ -1712,9 +1797,17 @@ local function Watch(inst, fn)
 	end)
 end
 
-function MX:SetTheme(name, instant)
+function MX:SetTheme(name, instant, keepOverride)
 	local def = MX.Themes[name]
 	if not def then return end
+	if not keepOverride then MX.AccentOverride = nil end
+	if MX.AccentOverride then
+		local c = {}
+		for k, v in pairs(def) do c[k] = v end
+		c.Accent = MX.AccentOverride
+		c.OnAccent = Lum(c.Accent) > 0.62 and C3(20, 20, 24) or C3(255, 255, 255)
+		def = c
+	end
 	MX.ThemeName = name
 	local win = MX.Window
 	local sweep = MX.ThemeSweep and not instant and win and win.Open
@@ -1750,11 +1843,615 @@ function MX:SetTheme(name, instant)
 		end
 	end
 	if MX.Options.theme and MX.Options.theme.Value ~= name then MX.Options.theme:Set(name, true) end
+	if MX.Options.accent and not keepOverride then MX.Options.accent:Set(def.Accent, true) end
 	for i = #MX.ThemeListeners, 1, -1 do
 		local ok, alive = pcall(MX.ThemeListeners[i], name)
 		if ok and alive == false then table.remove(MX.ThemeListeners, i) end
 	end
 end
+
+local LangCatalog = {
+	{ "Afrikaans", "af" },
+	{ "Albanian", "sq" },
+	{ "Amharic", "am" },
+	{ "Arabic", "ar" },
+	{ "Armenian", "hy" },
+	{ "Azerbaijani", "az" },
+	{ "Basque", "eu" },
+	{ "Belarusian", "be" },
+	{ "Bengali", "bn" },
+	{ "Bosnian", "bs" },
+	{ "Bulgarian", "bg" },
+	{ "Burmese", "my" },
+	{ "Catalan", "ca" },
+	{ "Cebuano", "ceb" },
+	{ "Chinese", "zh-CN" },
+	{ "Chinese (Traditional)", "zh-TW" },
+	{ "Corsican", "co" },
+	{ "Croatian", "hr" },
+	{ "Czech", "cs" },
+	{ "Danish", "da" },
+	{ "Dutch", "nl" },
+	{ "Esperanto", "eo" },
+	{ "Estonian", "et" },
+	{ "Filipino", "tl" },
+	{ "Finnish", "fi" },
+	{ "French", "fr" },
+	{ "Frisian", "fy" },
+	{ "Galician", "gl" },
+	{ "Georgian", "ka" },
+	{ "German", "de" },
+	{ "Greek", "el" },
+	{ "Gujarati", "gu" },
+	{ "Haitian Creole", "ht" },
+	{ "Hausa", "ha" },
+	{ "Hawaiian", "haw" },
+	{ "Hebrew", "iw" },
+	{ "Hindi", "hi" },
+	{ "Hmong", "hmn" },
+	{ "Hungarian", "hu" },
+	{ "Icelandic", "is" },
+	{ "Igbo", "ig" },
+	{ "Irish", "ga" },
+	{ "Italian", "it" },
+	{ "Japanese", "ja" },
+	{ "Javanese", "jw" },
+	{ "Kannada", "kn" },
+	{ "Kazakh", "kk" },
+	{ "Khmer", "km" },
+	{ "Korean", "ko" },
+	{ "Kurdish", "ku" },
+	{ "Kyrgyz", "ky" },
+	{ "Lao", "lo" },
+	{ "Latin", "la" },
+	{ "Latvian", "lv" },
+	{ "Lithuanian", "lt" },
+	{ "Luxembourgish", "lb" },
+	{ "Macedonian", "mk" },
+	{ "Malagasy", "mg" },
+	{ "Malay", "ms" },
+	{ "Malayalam", "ml" },
+	{ "Maltese", "mt" },
+	{ "Maori", "mi" },
+	{ "Marathi", "mr" },
+	{ "Mongolian", "mn" },
+	{ "Nepali", "ne" },
+	{ "Norwegian", "no" },
+	{ "Nyanja", "ny" },
+	{ "Pashto", "ps" },
+	{ "Persian", "fa" },
+	{ "Polish", "pl" },
+	{ "Portuguese", "pt" },
+	{ "Punjabi", "pa" },
+	{ "Romanian", "ro" },
+	{ "Russian", "ru" },
+	{ "Samoan", "sm" },
+	{ "Scots Gaelic", "gd" },
+	{ "Serbian", "sr" },
+	{ "Sesotho", "st" },
+	{ "Shona", "sn" },
+	{ "Sindhi", "sd" },
+	{ "Sinhala", "si" },
+	{ "Slovak", "sk" },
+	{ "Slovenian", "sl" },
+	{ "Somali", "so" },
+	{ "Spanish", "es" },
+	{ "Sundanese", "su" },
+	{ "Swahili", "sw" },
+	{ "Swedish", "sv" },
+	{ "Tajik", "tg" },
+	{ "Tamil", "ta" },
+	{ "Telugu", "te" },
+	{ "Thai", "th" },
+	{ "Turkish", "tr" },
+	{ "Ukrainian", "uk" },
+	{ "Urdu", "ur" },
+	{ "Uzbek", "uz" },
+	{ "Vietnamese", "vi" },
+	{ "Welsh", "cy" },
+	{ "Xhosa", "xh" },
+	{ "Yiddish", "yi" },
+	{ "Yoruba", "yo" },
+	{ "Zulu", "zu" },
+}
+
+local LangID = {
+	["Search..."] = "Cari...",
+	["Search"] = "Cari",
+	["options"] = "opsi",
+	["Select All"] = "Pilih Semua",
+	["Deselect All"] = "Batal Semua",
+	["Create Language"] = "Buat Bahasa",
+	["New Language"] = "Bahasa Baru",
+	["Quick Settings"] = "Pengaturan Cepat",
+	["Glass"] = "Kaca",
+	["See-through window"] = "Jendela transparan",
+	["Watermark"] = "Watermark",
+	["Keybind List"] = "Daftar Keybind",
+	["Mobile Button"] = "Tombol Mobile",
+	["Lock UI"] = "Kunci UI",
+	["Stops windows and buttons from being moved"] = "Mencegah jendela dan tombol dipindahkan",
+	["Copy Discord Invite"] = "Salin Undangan Discord",
+	["Copied"] = "Tersalin",
+	["Language"] = "Bahasa",
+	["Menu Scale"] = "Skala Menu",
+	["Theme"] = "Tema",
+	["Menu Key"] = "Tombol Menu",
+	["Unload"] = "Tutup Script",
+	["Auto"] = "Otomatis",
+	["Settings"] = "Pengaturan",
+	["Preset"] = "Preset",
+	["Accent"] = "Aksen",
+	["Custom Themes"] = "Tema Kustom",
+	["Create"] = "Buat",
+	["Delete"] = "Hapus",
+	["Effects"] = "Efek",
+	["Effect"] = "Efek",
+	["Animation behind the menu"] = "Animasi di belakang menu",
+	["Intensity"] = "Intensitas",
+	["Colors of the whole UI"] = "Warna seluruh UI",
+	["Configs"] = "Config",
+	["Config Name:"] = "Nama Config:",
+	["Type config name here..."] = "Ketik nama config di sini...",
+	["Save"] = "Simpan",
+	["Load"] = "Muat",
+	["Refresh"] = "Segarkan",
+	["Auto Load Config"] = "Muat Config Otomatis",
+	["Loads the selected config on launch"] = "Memuat config terpilih saat dijalankan",
+	["Auto Save"] = "Simpan Otomatis",
+	["Saves the loaded config when something changes"] = "Menyimpan config yang dimuat saat ada perubahan",
+	["Rename"] = "Ganti Nama",
+	["Reset"] = "Reset",
+	["Autoload mode"] = "Mode muat otomatis",
+	["All accounts"] = "Semua akun",
+	["This account"] = "Akun ini",
+	["Copy code"] = "Salin kode",
+	["Import"] = "Impor",
+	["paste a config code..."] = "tempel kode config...",
+	["no configs yet"] = "belum ada config",
+	["saved"] = "tersimpan",
+	["loaded"] = "dimuat",
+	["auto"] = "otomatis",
+	["none"] = "tidak ada",
+	["more"] = "lainnya",
+	["share"] = "bagikan",
+	["no themes"] = "belum ada tema",
+	["theme name"] = "nama tema",
+	["Unload Script?"] = "Tutup Script?",
+	["Stay"] = "Tetap",
+	["Cancel"] = "Batal",
+	["OK"] = "OK",
+	["The UI closes completely. Run the script again to bring it back."] = "UI ditutup sepenuhnya. Jalankan script lagi untuk memunculkannya kembali.",
+	["Rebind"] = "Atur Ulang",
+	["Toggle"] = "Toggle",
+	["Hold"] = "Tahan",
+	["Press"] = "Tekan",
+	["Clear Key"] = "Hapus Tombol",
+	["Locked"] = "Terkunci",
+	["Select language"] = "Pilih bahasa",
+	["Keybinds"] = "Keybind",
+	["Hold to delete"] = "Tahan untuk menghapus",
+	["Hold to reset"] = "Tahan untuk reset",
+	["Reset every option to its default"] = "Kembalikan semua opsi ke bawaan",
+	["Delete selected config"] = "Hapus config terpilih",
+	["Select a config first."] = "Pilih config dulu.",
+	["Config"] = "Config",
+	["Custom Theme"] = "Tema Kustom",
+	["Saved"] = "Tersimpan",
+	["Loaded"] = "Dimuat",
+	["Theme Name"] = "Nama Tema",
+	["Create Theme"] = "Buat Tema",
+	["Delete Theme"] = "Hapus Tema",
+	["Name"] = "Nama",
+	["Home"] = "Beranda",
+	["Language added"] = "Bahasa ditambahkan",
+}
+
+MX.Lang.Dict.Indonesia = LangID
+for _, l in ipairs(LangCatalog) do MX.Lang.Codes[l[1]] = l[2] end
+MX.AutoTranslate = true
+
+local function ReadJson(path)
+	if not (FS.ok() and isfile and isfile(path)) then return nil end
+	local ok, data = pcall(function() return HttpService:JSONDecode(readfile(path)) end)
+	return ok and data or nil
+end
+local function WriteJson(path, data)
+	if not FS.ok() then return false end
+	EnsureFolder(MX.ConfigFolder)
+	return pcall(writefile, path, HttpService:JSONEncode(data))
+end
+local function CleanName(n) return (tostring(n or ""):gsub("[\\/:*?\"<>|]", ""):match("^%s*(.-)%s*$")) end
+
+local function SaveLangState()
+	WriteJson(MX.ConfigFolder .. "/language.json", { current = MX.Lang.Current, list = MX.Lang.List })
+end
+local function SaveLangDict(name)
+	local d = MX.Lang.Dict[name]
+	if not d then return end
+	local out = {}
+	for k, v in pairs(d) do
+		if (name ~= "Indonesia" or LangID[k] == nil) and type(v) == "string" then out[k] = v end
+	end
+	WriteJson(MX.ConfigFolder .. "/lang_" .. CleanName(name) .. ".json", out)
+end
+local function LoadLangDict(name)
+	local d = MX.Lang.Dict[name]
+	if not d then
+		d = {}
+		MX.Lang.Dict[name] = d
+	end
+	local cached = ReadJson(MX.ConfigFolder .. "/lang_" .. CleanName(name) .. ".json")
+	if cached then
+		for k, v in pairs(cached) do
+			if d[k] == nil and type(v) == "string" then d[k] = v end
+		end
+	end
+	return d
+end
+
+function MX:GetLanguages() return MX.Lang.List end
+function MX:GetLanguage() return MX.Lang.Current end
+function MX:AvailableLanguages()
+	local out = {}
+	for _, l in ipairs(LangCatalog) do
+		if not table.find(MX.Lang.List, l[1]) then out[#out + 1] = l[1] end
+	end
+	return out
+end
+function MX:AddTranslations(lang, dict)
+	local d = MX.Lang.Dict[lang]
+	if not d then
+		d = {}
+		MX.Lang.Dict[lang] = d
+	end
+	for k, v in pairs(dict) do d[k] = v end
+	if not table.find(MX.Lang.List, lang) then table.insert(MX.Lang.List, lang) end
+	if MX.Lang.Current == lang then MX:_ApplyLang() end
+end
+function MX:AddLanguage(name, code)
+	if code then MX.Lang.Codes[name] = code end
+	if not table.find(MX.Lang.List, name) then table.insert(MX.Lang.List, name) end
+	SaveLangState()
+end
+function MX:_ApplyLang()
+	for i = #TrReg, 1, -1 do
+		local e = TrReg[i]
+		if e.o.Parent and e.o:IsDescendantOf(Gui) then
+			e.o[e.p] = MX:T(e.k)
+		else
+			table.remove(TrReg, i)
+		end
+	end
+	for _, f in ipairs(MX.Lang.Listeners) do pcall(f, MX.Lang.Current) end
+end
+
+local function Translate(code, texts)
+	local function single(text)
+		local url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=" .. code .. "&dt=t&q=" .. HttpService:UrlEncode(text)
+		local ok, body = pcall(function() return game:HttpGet(url) end)
+		if not ok or type(body) ~= "string" then return nil end
+		local ok2, data = pcall(function() return HttpService:JSONDecode(body) end)
+		if not ok2 or type(data) ~= "table" or type(data[1]) ~= "table" then return nil end
+		local out = ""
+		for _, seg in ipairs(data[1]) do
+			if type(seg) == "table" and type(seg[1]) == "string" then out ..= seg[1] end
+		end
+		return out
+	end
+	local clean = {}
+	for i, t in ipairs(texts) do clean[i] = (t:gsub("[\r\n]+", " ")) end
+	local joined = single(table.concat(clean, "\n"))
+	if joined then
+		local lines = string.split(joined, "\n")
+		if #lines == #texts + 1 and lines[#lines] == "" then table.remove(lines) end
+		if #lines == #texts then
+			for i, l in ipairs(lines) do lines[i] = l:match("^%s*(.-)%s*$") end
+			return lines
+		end
+	end
+	local out = {}
+	for i, t in ipairs(clean) do
+		local r = single(t)
+		if not r then return #out > 0 and out or nil end
+		out[i] = r:match("^%s*(.-)%s*$")
+	end
+	return out
+end
+MX._Translate = Translate
+
+local LangRun = 0
+local LangWarned = false
+function MX:_TranslateMissing(name)
+	local code = MX.Lang.Codes[name]
+	if not code or name == "English" or not MX.AutoTranslate then return end
+	local d = LoadLangDict(name)
+	local missing = {}
+	for k in pairs(TrKeys) do
+		if d[k] == nil then missing[#missing + 1] = k end
+	end
+	if #missing == 0 then return end
+	table.sort(missing)
+	LangRun += 1
+	local my = LangRun
+	task.spawn(function()
+		local i = 1
+		local failed = false
+		while i <= #missing and MX.Lang.Current == name and my == LangRun and not MX.Dead do
+			local batch, chars = {}, 0
+			while i <= #missing and #batch < 30 and chars < 1200 do
+				batch[#batch + 1] = missing[i]
+				chars += #missing[i]
+				i += 1
+			end
+			local res = Translate(code, batch)
+			if not res then
+				failed = true
+				break
+			end
+			for j, k in ipairs(batch) do
+				if res[j] and res[j] ~= "" then d[k] = res[j] else d[k] = k end
+			end
+			MX:_ApplyLang()
+			task.wait(0.15)
+		end
+		SaveLangDict(name)
+		if failed and not LangWarned then
+			LangWarned = true
+			MX:Notify({ Type = "Warning", Title = "Translation", Content = "Online translation is not reachable. Built-in texts still work.", Duration = 4 })
+		end
+	end)
+end
+
+function MX:SetLanguage(name)
+	if not table.find(MX.Lang.List, name) then return false end
+	MX.Lang.Current = name
+	LoadLangDict(name)
+	MX:_ApplyLang()
+	SaveLangState()
+	if name ~= "English" then MX:_TranslateMissing(name) end
+	return true
+end
+
+do
+	local st = ReadJson(MX.ConfigFolder .. "/language.json")
+	if st and type(st.list) == "table" then
+		for _, n in ipairs(st.list) do
+			if type(n) == "string" and MX.Lang.Codes[n] and not table.find(MX.Lang.List, n) then table.insert(MX.Lang.List, n) end
+		end
+		if type(st.current) == "string" and table.find(MX.Lang.List, st.current) then
+			MX.Lang.Current = st.current
+			LoadLangDict(st.current)
+		end
+	end
+end
+
+MX.CustomThemes = {}
+MX.CustomListeners = {}
+local function EncTheme(def)
+	local t = {}
+	for k, v in pairs(def) do
+		if typeof(v) == "Color3" then t[k] = { v.R, v.G, v.B } end
+	end
+	return t
+end
+local function DecTheme(t)
+	local d = {}
+	for k, v in pairs(t) do
+		if type(v) == "table" and #v == 3 then d[k] = Color3.new(v[1], v[2], v[3]) end
+	end
+	return d
+end
+function MX:GetCustomThemes()
+	local out = {}
+	for n in pairs(MX.CustomThemes) do out[#out + 1] = n end
+	table.sort(out)
+	return out
+end
+function MX:_SaveThemes()
+	local out = {}
+	for n in pairs(MX.CustomThemes) do out[n] = EncTheme(MX.Themes[n]) end
+	WriteJson(MX.ConfigFolder .. "/themes.json", out)
+	for _, f in ipairs(MX.CustomListeners) do pcall(f) end
+end
+function MX:LoadCustomThemes()
+	local data = ReadJson(MX.ConfigFolder .. "/themes.json")
+	if not data then return end
+	for n, t in pairs(data) do
+		local d = DecTheme(t)
+		if d.Window and d.Accent and d.Text and d.Card then
+			if not d.OnAccent then d.OnAccent = Lum(d.Accent) > 0.62 and C3(20, 20, 24) or C3(255, 255, 255) end
+			MX.Themes[n] = d
+			MX.CustomThemes[n] = true
+		end
+	end
+	for _, f in ipairs(MX.CustomListeners) do pcall(f) end
+end
+function MX:CreateTheme(name)
+	name = CleanName(name)
+	if name == "" then return nil end
+	if MX.Themes[name] and not MX.CustomThemes[name] then name = name .. " Custom" end
+	local def = {}
+	for k, v in pairs(MX.Theme) do def[k] = v end
+	MX.Themes[name] = def
+	MX.CustomThemes[name] = true
+	MX:_SaveThemes()
+	return name
+end
+function MX:DeleteTheme(name)
+	if not MX.CustomThemes[name] then return false end
+	MX.CustomThemes[name] = nil
+	MX.Themes[name] = nil
+	MX:_SaveThemes()
+	if MX.ThemeName == name then MX:SetTheme("Obsidian") end
+	return true
+end
+function MX:SetAccent(c)
+	MX.AccentOverride = c
+	MX:SetTheme(MX.ThemeName, true, true)
+end
+MX:LoadCustomThemes()
+
+local B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+local function b64enc(data)
+	local out = {}
+	for i = 1, #data, 3 do
+		local a, b, c = data:byte(i, i + 2)
+		local n = a * 65536 + (b or 0) * 256 + (c or 0)
+		local c1, c2, c3, c4 = math.floor(n / 262144) % 64, math.floor(n / 4096) % 64, math.floor(n / 64) % 64, n % 64
+		out[#out + 1] = B64:sub(c1 + 1, c1 + 1) .. B64:sub(c2 + 1, c2 + 1) .. (b and B64:sub(c3 + 1, c3 + 1) or "=") .. (c and B64:sub(c4 + 1, c4 + 1) or "=")
+	end
+	return table.concat(out)
+end
+local function b64dec(s)
+	s = s:gsub("[^%w%+/=]", "")
+	local rev = {}
+	for i = 1, 64 do rev[B64:sub(i, i)] = i - 1 end
+	local out = {}
+	for i = 1, #s, 4 do
+		local c1, c2, c3, c4 = s:sub(i, i), s:sub(i + 1, i + 1), s:sub(i + 2, i + 2), s:sub(i + 3, i + 3)
+		local n = (rev[c1] or 0) * 262144 + (rev[c2] or 0) * 4096 + (rev[c3] or 0) * 64 + (rev[c4] or 0)
+		out[#out + 1] = string.char(math.floor(n / 65536) % 256)
+		if c3 ~= "=" and c3 ~= "" then out[#out + 1] = string.char(math.floor(n / 256) % 256) end
+		if c4 ~= "=" and c4 ~= "" then out[#out + 1] = string.char(n % 256) end
+	end
+	return table.concat(out)
+end
+MX._b64enc, MX._b64dec = b64enc, b64dec
+
+function MX:_Collect()
+	local data = {}
+	for flag, obj in pairs(MX.Options) do
+		if flag:sub(1, 1) ~= "_" and obj.Serialize then
+			local ok, v = pcall(obj.Serialize, obj)
+			if ok then data[flag] = v end
+		end
+	end
+	return data
+end
+function MX:_Apply(data)
+	for flag, v in pairs(data) do
+		local obj = MX.Options[flag]
+		if obj and obj.Deserialize then pcall(obj.Deserialize, obj, v) end
+	end
+end
+function MX:_Snapshot()
+	local data = MX:_Collect()
+	local keys = {}
+	for k in pairs(data) do keys[#keys + 1] = k end
+	table.sort(keys)
+	local parts = {}
+	for _, k in ipairs(keys) do parts[#parts + 1] = k .. "=" .. HttpService:JSONEncode({ data[k] }) end
+	return table.concat(parts, ";")
+end
+function MX:ExportConfig(name)
+	local data
+	if name and name ~= "" then
+		data = ReadJson(MX.ConfigFolder .. "/" .. CleanName(name) .. ".json")
+	end
+	data = data or MX:_Collect()
+	return "MXCFG1:" .. b64enc(HttpService:JSONEncode(data))
+end
+function MX:ImportConfig(code, name)
+	code = tostring(code or ""):gsub("%s", "")
+	local body = code:match("^MXCFG1:(.+)$")
+	if not body then return nil, "invalid code" end
+	local ok, data = pcall(function() return HttpService:JSONDecode(b64dec(body)) end)
+	if not ok or type(data) ~= "table" then return nil, "invalid code" end
+	name = MX:UniqueConfigName(CleanName(name) ~= "" and CleanName(name) or "imported")
+	if not WriteJson(MX.ConfigFolder .. "/" .. name .. ".json", data) then return nil, "could not write" end
+	return name
+end
+function MX:RenameConfig(old, new)
+	old, new = CleanName(old), CleanName(new)
+	if old == "" or new == "" or old == new then return false end
+	local data = ReadJson(MX.ConfigFolder .. "/" .. old .. ".json")
+	if not data then return false end
+	if not WriteJson(MX.ConfigFolder .. "/" .. new .. ".json", data) then return false end
+	MX:DeleteConfig(old)
+	if MX.LoadedConfig == old then MX.LoadedConfig = new end
+	if MX:GetAutoLoad() == old then MX:SetAutoLoad(new) end
+	return true
+end
+function MX:ResetOptions()
+	for flag, obj in pairs(MX.Options) do
+		if flag:sub(1, 1) ~= "_" and obj._def ~= nil and obj.Deserialize then pcall(obj.Deserialize, obj, obj._def) end
+	end
+end
+
+MX.AutoSave = false
+MX.LoadedConfig = nil
+do
+	local p = MX.ConfigFolder .. "/autosave.txt"
+	if FS.ok() and isfile and isfile(p) then
+		local ok, s = pcall(readfile, p)
+		MX.AutoSave = ok and s == "1"
+	end
+end
+function MX:SetAutoSave(v)
+	MX.AutoSave = v and true or false
+	if FS.ok() then
+		EnsureFolder(MX.ConfigFolder)
+		pcall(writefile, MX.ConfigFolder .. "/autosave.txt", MX.AutoSave and "1" or "0")
+	end
+	MX._lastSnap = nil
+end
+function MX:_AutoSaveTick()
+	if not MX.AutoSave or not MX.LoadedConfig then
+		MX._lastSnap = nil
+		return
+	end
+	local snap = MX:_Snapshot()
+	if MX._lastSnap ~= nil and snap ~= MX._lastSnap then MX:SaveConfig(MX.LoadedConfig) end
+	MX._lastSnap = snap
+end
+task.spawn(function()
+	while not MX.Dead do
+		task.wait(2.5)
+		MX:_AutoSaveTick()
+	end
+end)
+
+MX.AutoMode = "All accounts"
+do
+	local p = MX.ConfigFolder .. "/autoload_mode.txt"
+	if FS.ok() and isfile and isfile(p) then
+		local ok, s = pcall(readfile, p)
+		if ok and (s == "This account" or s == "All accounts") then MX.AutoMode = s end
+	end
+end
+local function AutoPath(account)
+	return MX.ConfigFolder .. (account and ("/autoload_" .. LocalPlayer.UserId .. ".txt") or "/autoload.txt")
+end
+function MX:SetAutoMode(m)
+	MX.AutoMode = m == "This account" and m or "All accounts"
+	if FS.ok() then
+		EnsureFolder(MX.ConfigFolder)
+		pcall(writefile, MX.ConfigFolder .. "/autoload_mode.txt", MX.AutoMode)
+	end
+end
+function MX:SetAutoLoad(name)
+	if not FS.ok() then return end
+	EnsureFolder(MX.ConfigFolder)
+	pcall(writefile, AutoPath(MX.AutoMode == "This account"), name or "")
+end
+function MX:GetAutoLoad()
+	if not (FS.ok() and isfile) then return nil end
+	for _, acc in ipairs({ true, false }) do
+		local p = AutoPath(acc)
+		if isfile(p) then
+			local ok, s = pcall(readfile, p)
+			if ok and s ~= "" then return s end
+		end
+	end
+	return nil
+end
+function MX:LoadAutoConfig()
+	local n = MX:GetAutoLoad()
+	if n then return MX:LoadConfig(n) end
+	return false
+end
+
 
 local Container = {}
 local ContainerMT = { __index = Container }
@@ -1791,14 +2488,19 @@ local function MakeRow(self, o, ctlW)
 	return row, ctl, info
 end
 
+local function IsPremium(o)
+	return o.Premium or (o.Locked and tostring(o.LockedReason or ""):lower():find("premium") ~= nil)
+end
+
 local function Titles(info, o)
 	local th = New("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, TS(14) + 4), LayoutOrder = 1 }, info)
 	List(th, 6, Enum.FillDirection.Horizontal, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
-	local t = Lbl(th, { Text = tostring(o.Title or o.Name or ""), AutomaticSize = AX, Size = UDim2.new(0, 0, 1, 0), LayoutOrder = 1 })
+	local t = Lbl(th, { Text = tostring(o.Title or o.Name or ""), AutomaticSize = AX, Size = UDim2.new(0, 0, 1, 0), LayoutOrder = 1, Tr = true })
 	if o.Badge then MakeBadge(th, o.Badge, 2) end
+	if IsPremium(o) then MakeBadge(th, "PREMIUM", 3) end
 	local d
 	if o.Description and o.Description ~= "" then
-		d = Lbl(info, { Text = tostring(o.Description), TextSize = 12, Font = FONT.Reg, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY, TextWrapped = true, TextYAlignment = Enum.TextYAlignment.Top, LayoutOrder = 2 }, "Sub")
+		d = Lbl(info, { Text = tostring(o.Description), TextSize = 12, Font = FONT.Reg, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY, TextWrapped = true, TextYAlignment = Enum.TextYAlignment.Top, LayoutOrder = 2, Tr = true }, "Sub")
 	end
 	return t, d
 end
@@ -1814,6 +2516,10 @@ local function Flagged(o, obj)
 	if o.Flag then
 		MX.Options[o.Flag] = obj
 		MX.Flags[o.Flag] = obj:Get()
+		if obj.Serialize then
+			local ok, v = pcall(obj.Serialize, obj)
+			if ok then obj._def = v end
+		end
 	end
 end
 
@@ -1847,9 +2553,9 @@ end
 
 function Container:AddTitle(text)
 	if type(text) == "table" then text = text.Title or text.Text end
-	local l = Lbl(self.Content, { Text = tostring(text or ""), Font = FONT.Bold, TextSize = 15, Size = UDim2.new(1, 0, 0, 22), LayoutOrder = self:_Order() })
+	local l, e = Lbl(self.Content, { Text = tostring(text or ""), Font = FONT.Bold, TextSize = 15, Size = UDim2.new(1, 0, 0, 22), LayoutOrder = self:_Order(), Tr = true })
 	local obj = {}
-	function obj:Set(t) l.Text = tostring(t) end
+	function obj:Set(t) TrSet(e, tostring(t)) end
 	function obj:Get() return l.Text end
 	function obj:SetVisible(v) l.Visible = v end
 	self:_Reg(tostring(text), l)
@@ -1858,9 +2564,9 @@ end
 
 function Container:AddLabel(text)
 	if type(text) == "table" then text = text.Title or text.Text or text.Content end
-	local l = Lbl(self.Content, { Text = tostring(text or ""), Font = FONT.Reg, TextSize = 13, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY, TextWrapped = true, TextYAlignment = Enum.TextYAlignment.Top, LayoutOrder = self:_Order() }, "Sub")
+	local l, e = Lbl(self.Content, { Text = tostring(text or ""), Font = FONT.Reg, TextSize = 13, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY, TextWrapped = true, TextYAlignment = Enum.TextYAlignment.Top, LayoutOrder = self:_Order(), Tr = true }, "Sub")
 	local obj = {}
-	function obj:Set(t) l.Text = tostring(t) end
+	function obj:Set(t) TrSet(e, tostring(t)) end
 	function obj:Get() return l.Text end
 	function obj:SetVisible(v) l.Visible = v end
 	return obj
@@ -1875,12 +2581,12 @@ end
 function Container:AddParagraph(o)
 	o = o or {}
 	local row = Stacked(self, {})
-	local t = Lbl(row, { Text = tostring(o.Title or ""), Font = FONT.Bold, TextSize = 14, Size = UDim2.new(1, 0, 0, TS(14) + 4), LayoutOrder = 1 })
-	local c = Lbl(row, { Text = tostring(o.Content or ""), Font = FONT.Reg, TextSize = 13, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY, TextWrapped = true, TextYAlignment = Enum.TextYAlignment.Top, LayoutOrder = 2 }, "Sub")
+	local t, te = Lbl(row, { Text = tostring(o.Title or ""), Font = FONT.Bold, TextSize = 14, Size = UDim2.new(1, 0, 0, TS(14) + 4), LayoutOrder = 1, Tr = true })
+	local c, ce = Lbl(row, { Text = tostring(o.Content or ""), Font = FONT.Reg, TextSize = 13, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY, TextWrapped = true, TextYAlignment = Enum.TextYAlignment.Top, LayoutOrder = 2, Tr = true }, "Sub")
 	local obj = {}
 	function obj:Set(title, content)
-		if title then t.Text = tostring(title) end
-		if content then c.Text = tostring(content) end
+		if title then TrSet(te, tostring(title)) end
+		if content then TrSet(ce, tostring(content)) end
 	end
 	self:_Reg(o.Title, row)
 	return obj
@@ -1907,7 +2613,7 @@ function Container:AddCopyField(o)
 	local b = Box(ctl, { Size = UDim2.new(0, 64, 0, Touch and 28 or 24) }, "Accent", 5)
 	Lbl(b, { Text = o.ButtonText or "Copy", Size = UDim2.fromScale(1, 1), TextSize = 13, TextXAlignment = CENTER }, "OnAccent")
 	local h = Hit(b, 4)
-	h.Activated:Connect(function()
+	Tap(h, function()
 		local ok = Copy(o.Value or "")
 		MX:Notify({ Type = ok and "Success" or "Warning", Title = ok and "Copied" or "Not Supported", Content = ok and tostring(o.Value) or "Your executor has no clipboard.", Duration = 2 })
 	end)
@@ -2006,7 +2712,7 @@ function Container:AddButton(o)
 		end)
 		hit.MouseLeave:Connect(function() holding = false end)
 	else
-		hit.Activated:Connect(fire)
+		Tap(hit, fire)
 	end
 	if o.Loading then obj:SetLoading(true) end
 	Lockable(obj, row, o)
@@ -2062,7 +2768,7 @@ local function KeyCap(parent, key, onSet, order, modeApi)
 			end,
 		})
 	end
-	h.Activated:Connect(function()
+	Tap(h, function()
 		if UIS.KeyboardEnabled then listen() else menu() end
 	end)
 	h.MouseButton2Click:Connect(menu)
@@ -2074,7 +2780,7 @@ end
 local function NewColorPicker(o)
 	local c = o.Default or C3(255, 255, 255)
 	local h, s, v = c:ToHSV()
-	local cp = { Type = "ColorPicker", H = h, S = s, V = v, A = o.DefaultAlpha or 1, Rainbow = false, Speed = o.RainbowSpeed or 0.25, Watchers = {}, Title = o.Title }
+	local cp = { Type = "ColorPicker", H = h, S = s, V = v, A = o.DefaultAlpha or 1, Rainbow = false, Speed = o.RainbowSpeed or 0.25, Watchers = {}, Title = o.Title, NoRainbow = o.NoRainbow }
 	function cp:Get() return Color3.fromHSV(self.H, self.S, self.V) end
 	function cp:GetAlpha() return self.A end
 	function cp:GetRainbow() return self.Rainbow end
@@ -2127,6 +2833,7 @@ local function NewColorPicker(o)
 		MX.Flags[o.Flag .. "_rainbow"] = false
 	end
 	if o.Rainbow then cp:SetRainbow(true, true) end
+	cp._def = cp:Serialize()
 	return cp
 end
 
@@ -2166,11 +2873,15 @@ local function BuildPicker(cp)
 	local hb = Box(hr, { Size = UDim2.new(0, 84, 1, 0), LayoutOrder = 1 }, "Element", 5)
 	local hex = New("TextBox", { BackgroundTransparency = 1, Size = UDim2.new(1, -12, 1, 0), Position = UDim2.new(0, 6, 0, 0), Text = "", ClearTextOnFocus = false, Font = FONT.Mono, TextSize = TS(12), TextXAlignment = LEFT }, hb)
 	Bind(hex, { TextColor3 = "Text" })
-	Lbl(hr, { Text = "Rainbow", Size = UDim2.new(0, 54, 1, 0), TextSize = 12, LayoutOrder = 2 }, "Sub")
+	local rl = Lbl(hr, { Text = "Rainbow", Size = UDim2.new(0, 54, 1, 0), TextSize = 12, LayoutOrder = 2 }, "Sub")
 	local rt = Box(hr, { Size = UDim2.fromOffset(32, 18), LayoutOrder = 3 }, "Off", 9)
 	local rk = New("Frame", { Size = UDim2.fromOffset(12, 12), Position = UDim2.new(0, 3, 0.5, -6), BackgroundColor3 = C3(255, 255, 255), BorderSizePixel = 0 }, rt)
 	New("UICorner", { CornerRadius = UDim.new(1, 0) }, rk)
 	local rh = Hit(rt, 3)
+	if cp.NoRainbow then
+		rl.Visible = false
+		rt.Visible = false
+	end
 	local sh = New("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY, LayoutOrder = 6 }, f)
 	local sl = New("UIListLayout", { Padding = UDim.new(0, 4), FillDirection = Enum.FillDirection.Horizontal, Wraps = true, SortOrder = Enum.SortOrder.LayoutOrder }, sh)
 	local function refresh()
@@ -2211,7 +2922,7 @@ local function BuildPicker(cp)
 		end
 		refresh()
 	end)
-	rh.Activated:Connect(function() cp:SetRainbow(not cp.Rainbow) end)
+	Tap(rh, function() cp:SetRainbow(not cp.Rainbow) end)
 	local function rebuildSaved()
 		for _, ch in ipairs(sh:GetChildren()) do
 			if ch:IsA("GuiObject") then ch:Destroy() end
@@ -2219,7 +2930,7 @@ local function BuildPicker(cp)
 		local add = Box(sh, { Size = UDim2.fromOffset(20, 20), LayoutOrder = 0 }, "Element", 4, "Border")
 		Lbl(add, { Text = "+", Size = UDim2.fromScale(1, 1), TextXAlignment = CENTER, TextSize = 14, Font = FONT.Bold }, "Sub")
 		local ah = Hit(add, 3)
-		ah.Activated:Connect(function()
+		Tap(ah, function()
 			table.insert(MX.SavedColors, cp:Get())
 			rebuildSaved()
 		end)
@@ -2243,7 +2954,7 @@ local function BuildPicker(cp)
 					t0 = nil
 				end
 			end)
-			b.Activated:Connect(function()
+			Tap(b, function()
 				if t0 and os.clock() - t0 > 0.5 then return end
 				if cp.Rainbow then cp:SetRainbow(false) end
 				cp:Set(col)
@@ -2270,7 +2981,7 @@ local function Swatch(parent, cp, order)
 		if s.Parent then s.BackgroundColor3 = cp:Get() end
 	end)
 	local h = Hit(s, 4)
-	h.Activated:Connect(function() OpenPicker(cp, s) end)
+	Tap(h, function() OpenPicker(cp, s) end)
 	return s
 end
 
@@ -2278,23 +2989,32 @@ local function MakeMenu(title, width)
 	local f = NewPopupFrame(width or 240, nil)
 	Pad(f, 8, 8, 8, 8)
 	List(f, 6)
-	Lbl(f, { Text = tostring(title or ""), Font = FONT.Bold, TextSize = 13, Size = UDim2.new(1, 0, 0, 18), LayoutOrder = 0 })
+	Lbl(f, { Text = tostring(title or ""), Font = FONT.Bold, TextSize = 13, Size = UDim2.new(1, 0, 0, 18), LayoutOrder = 0, Tr = true })
 	local sc = New("ScrollingFrame", { BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY, CanvasSize = UDim2.new(), AutomaticCanvasSize = AY, ScrollBarThickness = 3, ScrollingDirection = Enum.ScrollingDirection.Y, LayoutOrder = 1 }, f)
 	Bind(sc, { ScrollBarImageColor3 = "Sub" })
-	local cons = New("UISizeConstraint", { MaxSize = Vector2.new(1e6, 300) }, sc)
 	List(sc, 5)
-	local c = setmetatable({ Content = sc, NoIndex = true, SizeConstraint = cons }, ContainerMT)
+	local c = setmetatable({ Content = sc, NoIndex = true, Scroll = sc }, ContainerMT)
 	return c, f
 end
 
-local function ShowMenu(menu, frame, anchor)
+local function ShowMenu(menu, frame, anchor, placement)
 	local ab = anchor.AbsolutePosition - Overlay.AbsolutePosition
 	local as, vp = anchor.AbsoluteSize, Overlay.AbsoluteSize
 	local below = vp.Y - (ab.Y + as.Y + 4) - 10
 	local above = ab.Y - 4 - 10
 	local avail = below >= 240 and below or math.max(below, above)
-	menu.SizeConstraint.MaxSize = Vector2.new(1e6, math.max(100, avail / MX.Scale - 56))
-	MX:ShowPopup(frame, anchor, { AlignRight = true })
+	local maxH = math.max(100, avail / MX.Scale - 56)
+	local sc = menu.Scroll
+	sc.AutomaticSize = AY
+	sc.Size = UDim2.new(1, 0, 0, 0)
+	MX:ShowPopup(frame, anchor, { AlignRight = placement == nil, Placement = placement })
+	task.spawn(function()
+		RunService.RenderStepped:Wait()
+		if not sc.Parent then return end
+		local h = sc.AbsoluteSize.Y / MX.Scale
+		sc.AutomaticSize = Enum.AutomaticSize.None
+		sc.Size = UDim2.new(1, 0, 0, math.max(40, math.min(maxH, h)))
+	end)
 end
 
 function Container:AddColorPicker(o)
@@ -2359,9 +3079,11 @@ function Container:AddToggle(o)
 	end
 	function obj:Serialize() return self.Value end
 	function obj:Deserialize(v) self:Set(v and true or false) end
-	local hit = Hit(row, 2)
-	Hover(hit, row, "Element", "Hover")
-	hit.Activated:Connect(function()
+	local hit = Hit(track, 4)
+	hit.AnchorPoint = Vector2.new(0.5, 0.5)
+	hit.Position = UDim2.fromScale(0.5, 0.5)
+	hit.Size = UDim2.new(0, (switch and 38 or 20) + 10, 0, RH)
+	Tap(hit, function()
 		if not obj.Locked then obj:Set(not obj.Value) end
 	end)
 	if o.Color then
@@ -2388,7 +3110,7 @@ function Container:AddToggle(o)
 		gi.AnchorPoint = Vector2.new(0.5, 0.5)
 		gi.Position = UDim2.fromScale(0.5, 0.5)
 		local gh = Hit(gear, 4)
-		gh.Activated:Connect(function() ShowMenu(menu, frame, gear) end)
+		Tap(gh, function() ShowMenu(menu, frame, gear) end)
 	end
 	if keyed then
 		local bind
@@ -2484,10 +3206,11 @@ function Container:AddSlider(o)
 		swKnob = New("Frame", { Size = UDim2.fromOffset(10, 10), Position = UDim2.new(0, 3, 0.5, -5), BackgroundColor3 = C3(255, 255, 255), BorderSizePixel = 0 }, swTrack)
 		New("UICorner", { CornerRadius = UDim.new(1, 0) }, swKnob)
 		local sh = Hit(swTrack, 4)
-		sh.Activated:Connect(function() if not obj.Locked then obj:SetToggle(not obj.ToggleValue) end end)
+		Tap(sh, function() if not obj.Locked then obj:SetToggle(not obj.ToggleValue) end end)
 	end
-	Lbl(left, { Text = tostring(o.Title or o.Name or ""), AutomaticSize = AX, Size = UDim2.new(0, 0, 1, 0), LayoutOrder = 1 })
+	Lbl(left, { Text = tostring(o.Title or o.Name or ""), AutomaticSize = AX, Size = UDim2.new(0, 0, 1, 0), LayoutOrder = 1, Tr = true })
 	if o.Badge then MakeBadge(left, o.Badge, 2) end
+	if IsPremium(o) then MakeBadge(left, "PREMIUM", 3) end
 	local vb = ValueBox(top, 80)
 	if o.Description and o.Description ~= "" then
 		Lbl(row, { Text = tostring(o.Description), TextSize = 12, Font = FONT.Reg, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY, TextWrapped = true, TextYAlignment = Enum.TextYAlignment.Top, LayoutOrder = 2 }, "Sub")
@@ -2528,11 +3251,18 @@ function Container:AddSlider(o)
 	function obj:GetToggle() return self.ToggleValue end
 	function obj:Serialize() return self.Value end
 	function obj:Deserialize(v) self:Set(v, false) end
-	local fine, startVal, startX
+	local fine, startVal, startX, touchOff = nil, nil, nil, 0
 	Drag(wrap, {
 		Lock = true,
 		Begin = function(i)
 			if obj.Locked then return false end
+			touchOff = 0
+			if i.UserInputType == Enum.UserInputType.Touch then
+				local c = knob.AbsolutePosition + knob.AbsoluteSize / 2
+				local p = GuiPos(i)
+				if math.abs(p.X - c.X) > 28 or math.abs(p.Y - c.Y) > 28 then return false end
+				touchOff = c.X - p.X
+			end
 			if i.UserInputType == Enum.UserInputType.MouseButton1 and UIS:IsKeyDown(Enum.KeyCode.LeftControl) then
 				fine = o.FineFactor or 0.1
 				startVal = obj.Value
@@ -2546,7 +3276,7 @@ function Container:AddSlider(o)
 			if fine then
 				obj:Set(startVal + (pos.X - startX) / w * (max - min) * fine)
 			else
-				obj:Set(min + math.clamp((pos.X - track.AbsolutePosition.X) / w, 0, 1) * (max - min))
+				obj:Set(min + math.clamp((pos.X + touchOff - track.AbsolutePosition.X) / w, 0, 1) * (max - min))
 			end
 		end,
 	})
@@ -2644,10 +3374,13 @@ function ListPopup(anchor, cfg)
 	local rows = math.max(1, math.min(#vals, Touch and 5 or 6))
 	local listH = rows * itemH + (rows - 1) * 2
 	local w = math.max(cfg.Width or 160, cfg.Multi and 190 or 130)
-	local h = 12 + listH + (showSearch and 36 or 0) + (cfg.Header and 34 or 0)
+	local h = 12 + listH + (showSearch and 36 or 0) + (cfg.Header and 34 or 0) + (cfg.Title and 22 or 0) + (cfg.Footer and (itemH + 6) or 0)
 	local f = NewPopupFrame(w, h)
 	Pad(f, 6, 6, 6, 6)
 	List(f, 6)
+	if cfg.Title then
+		Lbl(f, { Text = cfg.Title, Size = UDim2.new(1, 0, 0, 16), TextSize = 11, Font = FONT.Bold, LayoutOrder = 0, Tr = true }, "Sub")
+	end
 	local paintAll
 	local search
 	if showSearch then
@@ -2655,7 +3388,7 @@ function ListPopup(anchor, cfg)
 		local si = MakeIcon(sb, "search", 14, "Sub")
 		si.AnchorPoint = Vector2.new(0, 0.5)
 		si.Position = UDim2.new(0, 10, 0.5, 0)
-		search = New("TextBox", { BackgroundTransparency = 1, Size = UDim2.new(1, -38, 1, 0), Position = UDim2.new(0, 32, 0, 0), PlaceholderText = "Search " .. #vals .. " options", Text = "", ClearTextOnFocus = false, Font = FONT.Reg, TextSize = TS(13), TextXAlignment = LEFT }, sb)
+		search = New("TextBox", { BackgroundTransparency = 1, Size = UDim2.new(1, -38, 1, 0), Position = UDim2.new(0, 32, 0, 0), PlaceholderText = MX:T("Search") .. " " .. #vals .. " " .. MX:T("options"), Text = "", ClearTextOnFocus = false, Font = FONT.Reg, TextSize = TS(13), TextXAlignment = LEFT }, sb)
 		Bind(search, { TextColor3 = "Text", PlaceholderColor3 = "Sub" })
 	end
 	if cfg.Header then
@@ -2663,10 +3396,10 @@ function ListPopup(anchor, cfg)
 		List(hr, 6, Enum.FillDirection.Horizontal)
 		local function hb(text, all)
 			local b = Box(hr, { Size = UDim2.new(0.5, -3, 1, 0), LayoutOrder = all and 1 or 2 }, "Element", 8)
-			Lbl(b, { Text = text, Size = UDim2.fromScale(1, 1), TextXAlignment = CENTER, TextSize = 12 })
+			Lbl(b, { Text = text, Size = UDim2.fromScale(1, 1), TextXAlignment = CENTER, TextSize = 12, Tr = true })
 			local hh = Hit(b, 3)
 			Hover(hh, b, "Element", "Hover")
-			hh.Activated:Connect(function()
+			Tap(hh, function()
 				cfg.OnAll(all)
 				paintAll()
 			end)
@@ -2689,7 +3422,10 @@ function ListPopup(anchor, cfg)
 			else
 				it.t.TextColor3 = on and Theme.Accent or Theme.Text
 				it.c.Visible = on
+				it.b.BackgroundColor3 = Theme.Accent
+				it.b.BackgroundTransparency = on and 0.88 or 1
 			end
+			it.on = on
 		end
 	end
 	for i, v in ipairs(vals) do
@@ -2717,8 +3453,15 @@ function ListPopup(anchor, cfg)
 			b.BackgroundColor3 = Theme.Hover
 			b.BackgroundTransparency = 0.4
 		end)
-		hh.MouseLeave:Connect(function() b.BackgroundTransparency = 1 end)
-		hh.Activated:Connect(function()
+		hh.MouseLeave:Connect(function()
+			if items[i] and items[i].on and not cfg.Multi then
+				b.BackgroundColor3 = Theme.Accent
+				b.BackgroundTransparency = 0.88
+			else
+				b.BackgroundTransparency = 1
+			end
+		end)
+		Tap(hh, function()
 			cfg.OnPick(v)
 			paintAll()
 			if not cfg.Multi then MX:ClosePopup() end
@@ -2749,10 +3492,21 @@ function ListPopup(anchor, cfg)
 		end)
 		if not Touch then task.defer(function() search:CaptureFocus() end) end
 	end
+	if cfg.Footer then
+		local fr = Box(f, { Size = UDim2.new(1, 0, 0, itemH), LayoutOrder = 4 }, "Element", 6)
+		local fi = MakeIcon(fr, cfg.Footer.Icon or "plus", 14, "Sub")
+		fi.AnchorPoint = Vector2.new(0, 0.5)
+		fi.Position = UDim2.new(0, 10, 0.5, 0)
+		Lbl(fr, { Text = cfg.Footer.Text, Position = UDim2.new(0, 34, 0, 0), Size = UDim2.new(1, -40, 1, 0), TextSize = 13, Tr = true })
+		local fh = Hit(fr, 3)
+		Hover(fh, fr, "Element", "Hover")
+		Tap(fh, function() cfg.Footer.OnTap() end)
+	end
 	if cfg.Arrow then Tween(cfg.Arrow, { Rotation = 180 }, 0.12) end
 	if cfg.Stroke then cfg.Stroke.Color = Theme.Accent end
 	MX:ShowPopup(f, anchor, {
 		Destroy = true,
+		Placement = cfg.Placement,
 		OnClose = function()
 			if cfg.Arrow and cfg.Arrow.Parent then Tween(cfg.Arrow, { Rotation = 0 }, 0.12) end
 			if cfg.Stroke and cfg.Stroke.Parent then cfg.Stroke.Color = Theme.Border end
@@ -2791,7 +3545,7 @@ function Container:AddDropdown(o)
 	end
 	function obj:Serialize() return self.Value end
 	function obj:Deserialize(v) if v ~= nil then self:Set(v) end end
-	hit.Activated:Connect(function()
+	Tap(hit, function()
 		if obj.Locked then return end
 		ListPopup(btn, {
 			Values = obj.Values, Search = o.Search, Width = btn.AbsoluteSize.X / MX.Scale, Arrow = darr, Stroke = bst,
@@ -2811,8 +3565,9 @@ function Container:AddMultiSelect(o)
 	local row = Stacked(self, o)
 	local th = New("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, TS(14) + 4), LayoutOrder = 1 }, row)
 	List(th, 6, Enum.FillDirection.Horizontal, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
-	Lbl(th, { Text = tostring(o.Title or ""), AutomaticSize = AX, Size = UDim2.new(0, 0, 1, 0), LayoutOrder = 1 })
+	Lbl(th, { Text = tostring(o.Title or ""), AutomaticSize = AX, Size = UDim2.new(0, 0, 1, 0), LayoutOrder = 1, Tr = true })
 	if o.Badge then MakeBadge(th, o.Badge, 2) end
+	if IsPremium(o) then MakeBadge(th, "PREMIUM", 3) end
 	if o.Description and o.Description ~= "" then
 		Lbl(row, { Text = tostring(o.Description), TextSize = 12, Font = FONT.Reg, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY, TextWrapped = true, TextYAlignment = Enum.TextYAlignment.Top, LayoutOrder = 2 }, "Sub")
 	end
@@ -2857,7 +3612,7 @@ function Container:AddMultiSelect(o)
 	end
 	function obj:Serialize() return self.Value end
 	function obj:Deserialize(v) self:Set(v) end
-	hit.Activated:Connect(function()
+	Tap(hit, function()
 		if obj.Locked then return end
 		ListPopup(field, {
 			Values = obj.Values, Multi = true, Header = true, Search = o.Search, Width = field.AbsoluteSize.X / MX.Scale, Arrow = arr, Stroke = fst,
@@ -2976,8 +3731,9 @@ function Container:AddProgress(o)
 	local top = New("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, TS(14) + 4), LayoutOrder = 1 }, row)
 	local left = New("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, -90, 1, 0) }, top)
 	List(left, 6, Enum.FillDirection.Horizontal, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
-	Lbl(left, { Text = tostring(o.Title or ""), AutomaticSize = AX, Size = UDim2.new(0, 0, 1, 0), LayoutOrder = 1 })
+	Lbl(left, { Text = tostring(o.Title or ""), AutomaticSize = AX, Size = UDim2.new(0, 0, 1, 0), LayoutOrder = 1, Tr = true })
 	if o.Badge then MakeBadge(left, o.Badge, 2) end
+	if IsPremium(o) then MakeBadge(left, "PREMIUM", 3) end
 	local vl = Lbl(top, { Size = UDim2.new(0, 90, 1, 0), AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, 0, 0, 0), TextXAlignment = RIGHT, TextSize = 13 }, "Sub")
 	local _, _, fill = Bar(row, 8)
 	fill.Parent.Parent.LayoutOrder = 2
@@ -3029,7 +3785,7 @@ function Container:AddImage(o)
 	if o.Image then obj:SetImage(o.Image) end
 	if o.Callback then
 		local hit = Hit(card, 6)
-		hit.Activated:Connect(function() task.spawn(o.Callback) end)
+		Tap(hit, function() task.spawn(o.Callback) end)
 	end
 	self:_Reg(o.Title, card)
 	return obj
@@ -3071,7 +3827,7 @@ function Container:AddTabs(o)
 		local l = Box(b, { Size = UDim2.new(1, 0, 0, 2), Position = UDim2.new(0, 0, 1, -2), BackgroundTransparency = 1 }, "Accent")
 		l.BackgroundTransparency = 1
 		local h = Hit(b, 3)
-		h.Activated:Connect(function() obj:Select(name) end)
+		Tap(h, function() obj:Select(name) end)
 		self.Buttons[name] = { t = t, l = l }
 		if not self.Current then self:Select(name) end
 		return c
@@ -3082,54 +3838,234 @@ function Container:AddTabs(o)
 	return obj
 end
 
+local function HoldTap(hit, fill, secs, fn)
+	local holding = false
+	hit.InputBegan:Connect(function(i)
+		if i.UserInputType ~= Enum.UserInputType.MouseButton1 and i.UserInputType ~= Enum.UserInputType.Touch then return end
+		if secs * (MX.HoldScale or 1) <= 0 then fn() return end
+		holding = true
+		fill.Visible = true
+		local t0 = os.clock()
+		task.spawn(function()
+			while holding do
+				local p = math.clamp((os.clock() - t0) / (secs * (MX.HoldScale or 1)), 0, 1)
+				fill.Size = UDim2.new(p, 0, 1, 0)
+				if p >= 1 then
+					holding = false
+					fn()
+					break
+				end
+				RunService.Heartbeat:Wait()
+			end
+			Tween(fill, { Size = UDim2.new(0, 0, 1, 0) }, 0.15)
+			task.delay(0.17, function() fill.Visible = false end)
+		end)
+	end)
+	hit.InputEnded:Connect(function(i)
+		if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then holding = false end
+	end)
+end
+
 function Container:AddConfigManager(o)
 	o = o or {}
 	if not FS.ok() then
 		self:AddLabel("Config saving is not supported by your executor.")
 		return nil
 	end
-	local sel, nameText
-	local drop
-	local function list() return MX:ListConfigs() end
-	drop = self:AddDropdown({ Title = "Config", Values = list(), Placeholder = "Select config", Flag = "_cfg_list", Callback = function(v) sel = v end })
-	local tb = self:AddTextbox({ Title = "Name", Placeholder = "New config name", Flag = "_cfg_name", Callback = function(t) nameText = t end })
-	local function refresh()
-		drop:Refresh(list())
-		if sel and table.find(drop.Values, sel) then drop:Set(sel, true) else sel = nil end
+	local obj = {}
+	local sel
+	local names = {}
+	local rows = {}
+	local C = self.Content
+	local function T(k) return MX:T(k) end
+	local box = Box(C, { Size = UDim2.new(1, 0, 0, 140), LayoutOrder = self:_Order() }, "Element", 8, "Border")
+	local empty = Lbl(box, { Text = "no configs yet", Size = UDim2.fromScale(1, 1), TextXAlignment = CENTER, TextSize = 13, Font = FONT.Reg, Tr = true }, "Sub")
+	local sc = New("ScrollingFrame", { BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.new(1, -8, 1, -8), Position = UDim2.new(0, 4, 0, 4), CanvasSize = UDim2.new(), AutomaticCanvasSize = AY, ScrollBarThickness = 3, ScrollingDirection = Enum.ScrollingDirection.Y }, box)
+	Bind(sc, { ScrollBarImageColor3 = "Sub" })
+	List(sc, 2)
+	local status = Lbl(C, { Size = UDim2.new(1, 0, 0, 16), TextSize = 12, Font = FONT.Reg, LayoutOrder = self:_Order() }, "Sub")
+	local function updateStatus()
+		status.Text = string.format("%d %s  ·  %s: %s  ·  %s: %s", #names, T("saved"), T("loaded"), MX.LoadedConfig or T("none"), T("auto"), MX:GetAutoLoad() or T("none"))
 	end
-	table.insert(MX.ConfigListeners, function() if drop.Row.Parent then refresh() end end)
-	self:AddButton({ Title = "Create", Description = "Saves every option as a new config", Callback = function()
-		local n = MX:CreateConfig(tb:Get())
-		if n then
-			sel = n
-			refresh()
-			MX:Notify({ Type = "Success", Title = "Config", Content = "Created " .. n, Duration = 2 })
-		else
-			MX:Notify({ Type = "Error", Title = "Config", Content = "Could not save.", Duration = 2 })
+	local function paintRows()
+		for _, r in ipairs(rows) do
+			local on = r.name == sel
+			r.frame.BackgroundColor3 = Theme.Accent
+			r.frame.BackgroundTransparency = on and 0.85 or 1
+			r.label.TextColor3 = on and Theme.Accent or Theme.Text
 		end
-	end })
-	self:AddButton({ Title = "Load", Callback = function()
-		if not sel then MX:Notify({ Type = "Warning", Title = "Config", Content = "Select a config first.", Duration = 2 }) return end
-		local ok = MX:LoadConfig(sel)
-		MX:Notify({ Type = ok and "Success" or "Error", Title = "Config", Content = ok and ("Loaded " .. sel) or "Could not load.", Duration = 2 })
-	end })
-	self:AddButton({ Title = "Save", Description = "Overwrites the selected config", Callback = function()
-		if not sel then MX:Notify({ Type = "Warning", Title = "Config", Content = "Select a config first.", Duration = 2 }) return end
-		local ok = MX:SaveConfig(sel)
-		MX:Notify({ Type = ok and "Success" or "Error", Title = "Config", Content = ok and ("Saved " .. sel) or "Could not save.", Duration = 2 })
-	end })
-	self:AddButton({ Title = "Delete", Hold = true, Description = "Hold to delete the selected config", Callback = function()
-		if not sel then return end
-		MX:DeleteConfig(sel)
-		MX:Notify({ Type = "Info", Title = "Config", Content = "Deleted " .. sel, Duration = 2 })
+	end
+	local function refresh()
+		for _, c in ipairs(sc:GetChildren()) do
+			if c:IsA("GuiObject") then c:Destroy() end
+		end
+		rows = {}
+		names = MX:ListConfigs()
+		if sel and not table.find(names, sel) then sel = nil end
+		empty.Visible = #names == 0
+		for i, n in ipairs(names) do
+			local f = New("Frame", { Size = UDim2.new(1, 0, 0, Touch and 32 or 26), LayoutOrder = i, BackgroundTransparency = 1, BorderSizePixel = 0 }, sc)
+			New("UICorner", { CornerRadius = UDim.new(0, 6) }, f)
+			local l = Lbl(f, { Text = n, Size = UDim2.new(1, -16, 1, 0), Position = UDim2.new(0, 8, 0, 0), TextSize = 13, TextTruncate = Enum.TextTruncate.AtEnd }, false)
+			local h = Hit(f, 3)
+			Tap(h, function()
+				sel = n
+				paintRows()
+			end)
+			rows[#rows + 1] = { frame = f, label = l, name = n }
+		end
+		paintRows()
+		updateStatus()
+	end
+	function obj:Refresh() refresh() end
+	function obj:Select(n)
+		sel = n
+		paintRows()
+	end
+	function obj:GetSelected() return sel end
+	table.insert(MX.ConfigListeners, function()
+		if box.Parent then refresh() end
+	end)
+	table.insert(MX.Lang.Listeners, function()
+		if box.Parent then updateStatus() end
+	end)
+
+	local function field(placeholderKey)
+		local fb = Box(C, { Size = UDim2.new(1, 0, 0, Touch and 34 or 30), LayoutOrder = self:_Order() }, "Element", 7, "Border")
+		local tb = New("TextBox", { BackgroundTransparency = 1, Size = UDim2.new(1, -16, 1, 0), Position = UDim2.new(0, 8, 0, 0), Text = "", ClearTextOnFocus = false, Font = FONT.Reg, TextSize = TS(13), TextXAlignment = LEFT }, fb)
+		Bind(tb, { TextColor3 = "Text", PlaceholderColor3 = "Sub" })
+		Tr(tb, placeholderKey, "PlaceholderText")
+		return tb
+	end
+	local function caption(key)
+		return Lbl(C, { Text = key, Size = UDim2.new(1, 0, 0, 16), TextSize = 12, Font = FONT.Med, LayoutOrder = self:_Order(), Tr = true }, "Text")
+	end
+	local function gridRow()
+		local r = New("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, Touch and 34 or 30), LayoutOrder = self:_Order() }, C)
+		List(r, 6, Enum.FillDirection.Horizontal)
+		return r
+	end
+	local function gbtn(parent, text, o2, fn)
+		o2 = o2 or {}
+		local b = Box(parent, { Size = o2.full and UDim2.new(1, 0, 1, 0) or UDim2.new(0.5, -3, 1, 0), ClipsDescendants = true }, "Element", 7, "Border")
+		local fill = Box(b, { Size = UDim2.new(0, 0, 1, 0), BackgroundTransparency = 0.75, Visible = false }, o2.red and "Danger" or "Accent", 7)
+		fill.BackgroundTransparency = 0.75
+		Lbl(b, { Text = text, Size = UDim2.fromScale(1, 1), TextXAlignment = CENTER, TextSize = 13, Tr = true }, o2.red and "Danger" or "Text")
+		local h = Hit(b, 3)
+		if o2.hold then HoldTap(h, fill, o2.hold, fn) else
+			Hover(h, b, "Element", "Hover")
+			Tap(h, fn)
+		end
+		return b
+	end
+	local function note(kind, title, content)
+		MX:Notify({ Type = kind, Title = title, Content = content, Duration = 2.2 })
+	end
+
+	caption("Config Name:")
+	local nameBox = field("Type config name here...")
+	local r1 = gridRow()
+	gbtn(r1, "Save", nil, function()
+		local n = CleanName(nameBox.Text)
+		if n == "" then n = sel or MX.LoadedConfig or "" end
+		if n == "" then note("Warning", "Config", "Select a config first.") return end
+		if MX:SaveConfig(n) then
+			sel = n
+			MX.LoadedConfig = n
+			refresh()
+			note("Success", "Config", "Saved " .. n)
+		else
+			note("Error", "Config", "Could not save.")
+		end
+	end)
+	gbtn(r1, "Load", nil, function()
+		if not sel then note("Warning", "Config", "Select a config first.") return end
+		if MX:LoadConfig(sel) then
+			updateStatus()
+			note("Success", "Config", "Loaded " .. sel)
+		else
+			note("Error", "Config", "Could not load.")
+		end
+	end)
+	local r2 = gridRow()
+	gbtn(r2, "Delete", { red = true, hold = 1 }, function()
+		if not sel then note("Warning", "Config", "Select a config first.") return end
+		local n = sel
+		MX:DeleteConfig(n)
+		if MX.LoadedConfig == n then MX.LoadedConfig = nil end
+		if MX:GetAutoLoad() == n then MX:SetAutoLoad(nil) end
 		sel = nil
 		refresh()
+		note("Info", "Config", "Deleted " .. n)
+	end)
+	gbtn(r2, "Refresh", nil, function() refresh() end)
+
+	local autoT
+	autoT = self:AddToggle({ Title = "Auto Load Config", Description = "Loads the selected config on launch", Style = "Switch", Flag = "_cfg_auto", Default = MX:GetAutoLoad() ~= nil, Callback = function(v)
+		if v then
+			if not sel then
+				autoT:Set(false, true)
+				note("Warning", "Config", "Select a config first.")
+				return
+			end
+			MX:SetAutoLoad(sel)
+		else
+			MX:SetAutoLoad(nil)
+		end
+		updateStatus()
 	end })
-	self:AddToggle({ Title = "Autoload Selected", Description = "Loads it with MX:LoadAutoConfig()", Style = "Switch", Flag = "_cfg_auto", Default = MX:GetAutoLoad() ~= nil, Callback = function(v)
-		MX:SetAutoLoad(v and sel or nil)
+	self:AddToggle({ Title = "Auto Save", Description = "Saves the loaded config when something changes", Style = "Switch", Flag = "_cfg_autosave", Default = MX.AutoSave, Callback = function(v)
+		if v and not MX.LoadedConfig and sel then MX.LoadedConfig = sel end
+		MX:SetAutoSave(v)
+		updateStatus()
 	end })
-	self:AddButton({ Title = "Refresh", Callback = function() refresh() end })
-	return drop
+
+	Lbl(C, { Text = "more", Size = UDim2.new(1, 0, 0, 16), TextXAlignment = CENTER, TextSize = 11, Font = FONT.Med, LayoutOrder = self:_Order(), Tr = true }, "Sub")
+	local r3 = gridRow()
+	gbtn(r3, "Rename", nil, function()
+		local n = CleanName(nameBox.Text)
+		if not sel or n == "" then note("Warning", "Config", "Select a config first.") return end
+		if MX:RenameConfig(sel, n) then
+			sel = n
+			refresh()
+			note("Success", "Config", "Renamed to " .. n)
+		else
+			note("Error", "Config", "Could not rename.")
+		end
+	end)
+	gbtn(r3, "Reset", { red = true, hold = 1 }, function()
+		MX:ResetOptions()
+		note("Info", "Config", "Reset every option to its default")
+	end)
+	self:AddDropdown({ Title = "Autoload mode", Values = { "All accounts", "This account" }, Default = MX.AutoMode, Search = false, Callback = function(v)
+		MX:SetAutoMode(v)
+		local cur = MX:GetAutoLoad()
+		if cur then MX:SetAutoLoad(cur) end
+		updateStatus()
+	end })
+
+	Lbl(C, { Text = "share", Size = UDim2.new(1, 0, 0, 16), TextXAlignment = CENTER, TextSize = 11, Font = FONT.Med, LayoutOrder = self:_Order(), Tr = true }, "Sub")
+	local r4 = gridRow()
+	gbtn(r4, "Copy code", { full = true }, function()
+		local code = MX:ExportConfig(sel)
+		local ok = Copy(code)
+		note(ok and "Success" or "Warning", ok and "Copied" or "Not Supported", ok and "Config code copied" or "Your executor has no clipboard.")
+	end)
+	local importBox = field("paste a config code...")
+	local r5 = gridRow()
+	gbtn(r5, "Import", { full = true }, function()
+		local n, err = MX:ImportConfig(importBox.Text, nameBox.Text)
+		if n then
+			sel = n
+			importBox.Text = ""
+			refresh()
+			note("Success", "Config", "Imported " .. n)
+		else
+			note("Error", "Config", err or "invalid code")
+		end
+	end)
+	refresh()
+	return obj
 end
 
 local function RevealChain(c)
@@ -3151,6 +4087,7 @@ local function NewSection(parent, base, o)
 	o = o or {}
 	local title = tostring(o.Title or o.Name or "")
 	local headless = o.NoHeader or title == ""
+	if o.Collapsible == nil and not headless then o.Collapsible = true end
 	local card = Box(parent, { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY, LayoutOrder = base.order or 0, ClipsDescendants = true }, "Card", 8, "Border")
 	GlassOn(card, 0.35)
 	List(card, 0)
@@ -3171,22 +4108,24 @@ local function NewSection(parent, base, o)
 			local ic = MakeIcon(left, o.Icon, 18, "Accent")
 			if ic then ic.LayoutOrder = 1 end
 		end
-		sec.TitleLabel = Lbl(left, { Text = title, Font = FONT.Bold, TextSize = 14, AutomaticSize = AX, Size = UDim2.new(0, 0, 1, 0), LayoutOrder = 2 })
+		sec.TitleLabel, sec.TitleEntry = Lbl(left, { Text = title, Font = FONT.Bold, TextSize = 14, AutomaticSize = AX, Size = UDim2.new(0, 0, 1, 0), LayoutOrder = 2, Tr = true })
 		if o.Badge then MakeBadge(left, o.Badge, 3) end
 		local right = New("Frame", { BackgroundTransparency = 1, AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -10, 0, 0), Size = UDim2.new(0, 70, 1, 0), ZIndex = 4 }, header)
 		List(right, 8, Enum.FillDirection.Horizontal, Enum.HorizontalAlignment.Right, Enum.VerticalAlignment.Center)
 		if o.Collapsible then
-			arrow = MakeIcon(right, "chevron-down", 14, "Sub")
-			arrow.LayoutOrder = 2
+			local cb = Box(right, { Size = UDim2.fromOffset(22, 22), LayoutOrder = 2 }, "Element", 6)
+			arrow = MakeIcon(cb, "chevron-down", 12, "Sub")
+			arrow.AnchorPoint = Vector2.new(0.5, 0.5)
+			arrow.Position = UDim2.fromScale(0.5, 0.5)
 			local ch = Hit(header, 2)
-			ch.Activated:Connect(function() sec:SetCollapsed(not sec.Collapsed) end)
+			Tap(ch, function() sec:SetCollapsed(not sec.Collapsed) end)
 		end
 		if o.Toggle then
 			swTrack = Box(right, { Size = UDim2.fromOffset(34, 18), LayoutOrder = 1, BackgroundTransparency = 0 }, nil, 9)
 			swKnob = New("Frame", { Size = UDim2.fromOffset(12, 12), Position = UDim2.new(0, 3, 0.5, -6), BackgroundColor3 = C3(255, 255, 255), BorderSizePixel = 0 }, swTrack)
 			New("UICorner", { CornerRadius = UDim.new(1, 0) }, swKnob)
 			local sh = Hit(swTrack, 5)
-			sh.Activated:Connect(function() sec:SetToggle(not sec.ToggleValue) end)
+			Tap(sh, function() sec:SetToggle(not sec.ToggleValue) end)
 		end
 		local line = Box(header, { Size = UDim2.new(1, -20, 0, 1), Position = UDim2.new(0, 10, 1, -1), BackgroundTransparency = 0.5 }, "Border")
 	end
@@ -3225,7 +4164,7 @@ local function NewSection(parent, base, o)
 	function sec:ToggleCollapsed() self:SetCollapsed(not self.Collapsed) end
 	function sec:IsCollapsed() return self.Collapsed end
 	function sec:SetTitle(t)
-		if self.TitleLabel then self.TitleLabel.Text = tostring(t) end
+		if self.TitleEntry then TrSet(self.TitleEntry, tostring(t)) end
 	end
 	function sec:SetVisible(v) card.Visible = v end
 	function sec:Destroy() card:Destroy() end
@@ -3412,7 +4351,7 @@ function Window:AddTab(a, b)
 		tab.IconObj.Position = UDim2.new(0, 20, 0.5, 0)
 		tab.IconObj.ZIndex = 2
 	end
-	tab.Label = Lbl(btn, { Text = tab.Title, Position = UDim2.new(0, 36, 0, 0), Size = UDim2.new(1, -44, 1, 0), TextTruncate = Enum.TextTruncate.AtEnd, TextSize = 13 }, false)
+	tab.Label = Lbl(btn, { Text = tab.Title, Position = UDim2.new(0, 36, 0, 0), Size = UDim2.new(1, -44, 1, 0), TextTruncate = Enum.TextTruncate.AtEnd, TextSize = 13, Tr = true }, false)
 	if o.Badge then
 		local bh = New("Frame", { BackgroundTransparency = 1, AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -8, 0.5, 0), Size = UDim2.new(0, 0, 0, 16), AutomaticSize = AX }, btn)
 		tab.BadgeObj = MakeBadge(bh, o.Badge, 1)
@@ -3424,7 +4363,7 @@ function Window:AddTab(a, b)
 	hit.MouseLeave:Connect(function()
 		if self.Selected ~= tab then btn.BackgroundTransparency = 1 end
 	end)
-	hit.Activated:Connect(function() tab:Select() end)
+	Tap(hit, function() tab:Select() end)
 	MX:Tip(hit, function() return self.Collapsed and tab.Title or nil end)
 	Watch(btn, function() tab:_Style() end)
 	table.insert(self.Tabs, tab)
@@ -3458,13 +4397,15 @@ function Window:_ApplySide()
 	for _, t in ipairs(self.Tabs) do
 		t.Label.Visible = not col
 		if t.BadgeObj then t.BadgeObj.Parent.Visible = not col end
-		if t.IconObj then t.IconObj.Position = UDim2.new(0, col and 28 or 20, 0.5, 0) end
+		if t.IconObj then t.IconObj.Position = col and UDim2.new(0.5, 0, 0.5, 0) or UDim2.new(0, 20, 0.5, 0) end
 	end
 	for _, c in ipairs(self.Cats) do
 		c.l.Visible = not col
 		c.line.Visible = col
 	end
 	if self.ProfileName then self.ProfileName.Visible = not col end
+	if self.ProfileArrow then self.ProfileArrow.Visible = not col end
+	if self.ProfileAvatar then self.ProfileAvatar.Position = col and UDim2.new(0.5, 0, 0.5, 0) or UDim2.new(0, 28, 0.5, 0) end
 end
 
 function Window:_SideW(w)
@@ -3565,8 +4506,8 @@ function Window:Dialog(o)
 	local card = Box(dim, { Size = UDim2.new(0, math.min(340, (self.W or 400) - 40), 0, 0), AutomaticSize = AY, AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), ZIndex = 61 }, "Card", 10, "Border")
 	Pad(card, 14, 14, 14, 14)
 	List(card, 8)
-	Lbl(card, { Text = tostring(o.Title or "Dialog"), Font = FONT.Bold, TextSize = 16, Size = UDim2.new(1, 0, 0, 20), LayoutOrder = 1 })
-	Lbl(card, { Text = tostring(o.Content or ""), Font = FONT.Reg, TextSize = 13, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY, TextWrapped = true, TextYAlignment = Enum.TextYAlignment.Top, LayoutOrder = 2 }, "Sub")
+	Lbl(card, { Text = tostring(o.Title or "Dialog"), Font = FONT.Bold, TextSize = 16, Size = UDim2.new(1, 0, 0, 20), LayoutOrder = 1, Tr = true })
+	Lbl(card, { Text = tostring(o.Content or ""), Font = FONT.Reg, TextSize = 13, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY, TextWrapped = true, TextYAlignment = Enum.TextYAlignment.Top, LayoutOrder = 2, Tr = true }, "Sub")
 	local br = New("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, Touch and 38 or 32), LayoutOrder = 3 }, card)
 	local btns = o.Buttons or { { Title = "OK", Primary = true } }
 	List(br, 6, Enum.FillDirection.Horizontal)
@@ -3576,9 +4517,9 @@ function Window:Dialog(o)
 	end
 	for _, b in ipairs(btns) do
 		local bb = Box(br, { Size = UDim2.new(1 / #btns, -6 * (#btns - 1) / #btns, 1, 0) }, b.Primary and "Accent" or "Element", 6)
-		Lbl(bb, { Text = tostring(b.Title or b.Text or "OK"), Size = UDim2.fromScale(1, 1), TextXAlignment = CENTER, TextSize = 13 }, b.Primary and "OnAccent" or "Text")
+		Lbl(bb, { Text = tostring(b.Title or b.Text or "OK"), Size = UDim2.fromScale(1, 1), TextXAlignment = CENTER, TextSize = 13, Tr = true }, b.Primary and "OnAccent" or "Text")
 		local h = Hit(bb, 3)
-		h.Activated:Connect(function()
+		Tap(h, function()
 			close()
 			if b.Callback then task.spawn(b.Callback) end
 		end)
@@ -3808,6 +4749,135 @@ end
 function MX:GetLocked() return MX.Locked end
 function MX:ToggleLock() MX:SetLocked(not MX.Locked) end
 
+function Window:OpenProfile()
+	if not self.Profile then return end
+	self.Profile.refresh()
+	MX:ShowPopup(self.Profile.frame, self.ProfileCard, { Placement = "RightBottom" })
+end
+
+function Window:_BuildProfile()
+	local win = self
+	if not win.ProfileCard then return end
+	local f = NewPopupFrame(250, nil)
+	Pad(f, 8, 8, 8, 8)
+	List(f, 3)
+	local values = {}
+	local function refresh()
+		for _, e in ipairs(values) do e[1].Text = e[2]() end
+		if win.ProfileAvatar and win.Profile and win.Profile.avatar then win.Profile.avatar.Image = win.ProfileAvatar.Image end
+	end
+	local hd = New("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 46), LayoutOrder = 1 }, f)
+	local av = New("ImageLabel", { Size = UDim2.fromOffset(34, 34), Position = UDim2.new(0, 6, 0.5, -17), BackgroundTransparency = 0, BorderSizePixel = 0, Image = win.ProfileAvatar and win.ProfileAvatar.Image or "" }, hd)
+	Bind(av, { BackgroundColor3 = "Element" })
+	New("UICorner", { CornerRadius = UDim.new(1, 0) }, av)
+	Lbl(hd, { Text = LocalPlayer.DisplayName, Position = UDim2.new(0, 50, 0, 6), Size = UDim2.new(1, -56, 0, 18), TextSize = 14, Font = FONT.Bold, TextTruncate = Enum.TextTruncate.AtEnd })
+	Lbl(hd, { Text = "@" .. LocalPlayer.Name, Position = UDim2.new(0, 50, 0, 24), Size = UDim2.new(1, -56, 0, 14), TextSize = 11, Font = FONT.Reg, TextTruncate = Enum.TextTruncate.AtEnd }, "Sub")
+	Box(f, { Size = UDim2.new(1, 0, 0, 1), LayoutOrder = 2, BackgroundTransparency = 0.5 }, "Border")
+	local order = 2
+	local function prow(icon, key, valueFn, onTap, red)
+		order += 1
+		local r = New("Frame", { Size = UDim2.new(1, 0, 0, Touch and 38 or 34), LayoutOrder = order, BackgroundTransparency = 1, BorderSizePixel = 0 }, f)
+		New("UICorner", { CornerRadius = UDim.new(0, 7) }, r)
+		local ic = MakeIcon(r, icon, 16, red and "Danger" or "Sub")
+		ic.AnchorPoint = Vector2.new(0, 0.5)
+		ic.Position = UDim2.new(0, 10, 0.5, 0)
+		Lbl(r, { Text = key, Position = UDim2.new(0, 36, 0, 0), Size = UDim2.new(0.5, -36, 1, 0), TextSize = 13, Tr = true }, red and "Danger" or "Text")
+		if valueFn then
+			local v = Lbl(r, { Text = valueFn(), AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -28, 0, 0), Size = UDim2.new(0.5, -30, 1, 0), TextXAlignment = RIGHT, TextSize = 12, Font = FONT.Reg, TextTruncate = Enum.TextTruncate.AtEnd }, "Sub")
+			values[#values + 1] = { v, valueFn }
+			local ch = MakeIcon(r, "chevron-right", 12, "Sub")
+			ch.AnchorPoint = Vector2.new(1, 0.5)
+			ch.Position = UDim2.new(1, -10, 0.5, 0)
+		end
+		local h = Hit(r, 3)
+		h.MouseEnter:Connect(function()
+			r.BackgroundColor3 = Theme.Hover
+			r.BackgroundTransparency = 0.5
+		end)
+		h.MouseLeave:Connect(function() r.BackgroundTransparency = 1 end)
+		Tap(h, function() onTap(r) end)
+		return r
+	end
+
+	local scaleMenu, scaleFrame = MakeMenu("Menu Scale", 230)
+	local scaleSlider = scaleMenu:AddSlider({ Title = "Menu Scale", Flag = "ui_scale", Min = 60, Max = 140, Increment = 5, Default = 100, Suffix = "%", Callback = function(v)
+		win:SetScale(v / 100)
+		refresh()
+	end })
+
+	local function openNew(anchor)
+		ListPopup(anchor, {
+			Title = "New Language", Values = MX:AvailableLanguages(), Search = true, Width = 210, Placement = "Right",
+			IsSel = function() return false end,
+			OnPick = function(v)
+				MX:AddLanguage(v)
+				MX:SetLanguage(v)
+				MX:Notify({ Type = "Success", Title = "Language added", Content = v, Duration = 2 })
+				MX:ClosePopup()
+			end,
+		})
+	end
+	local function openLanguage(r)
+		local lf
+		lf = ListPopup(r, {
+			Values = MX.Lang.List, Search = true, Width = 200, Placement = "Right",
+			IsSel = function(v) return v == MX.Lang.Current end,
+			OnPick = function(v) MX:SetLanguage(v) end,
+			Footer = { Text = "Create Language", Icon = "plus", OnTap = function() openNew(lf) end },
+		})
+	end
+	local function allThemes()
+		local out = {}
+		for _, n in ipairs(MX.ThemeOrder) do out[#out + 1] = n end
+		for _, n in ipairs(MX:GetCustomThemes()) do out[#out + 1] = n end
+		return out
+	end
+	local keyRow
+	prow("globe", "Language", function() return MX.Lang.Current end, openLanguage)
+	prow("maximize-2", "Menu Scale", function() return MX.UserScale == 1 and MX:T("Auto") or (math.floor(MX.UserScale * 100 + 0.5) .. "%") end, function(r)
+		scaleSlider:Set(MX.UserScale * 100, true)
+		ShowMenu(scaleMenu, scaleFrame, r, "Right")
+	end)
+	prow("palette", "Theme", function() return MX.ThemeName end, function(r)
+		ListPopup(r, {
+			Values = allThemes(), Search = true, Width = 200, Placement = "Right",
+			IsSel = function(v) return v == MX.ThemeName end,
+			OnPick = function(v) MX:SetTheme(v) end,
+		})
+	end)
+	keyRow = prow("keyboard", "Menu Key", function() return "[" .. KeyLabel(MX.MenuKeyCode) .. "]" end, function()
+		if MX.Listening then return end
+		for _, e in ipairs(values) do
+			if e[2] and e[3] == "key" then e[1].Text = "[...]" end
+		end
+		MX:Listen(function(r)
+			if r == false then refresh() return end
+			if r == nil or r.EnumType == Enum.KeyCode then MX:SetMenuKey(r) end
+			refresh()
+		end)
+	end)
+	values[#values][3] = "key"
+	order += 1
+	Box(f, { Size = UDim2.new(1, 0, 0, 1), LayoutOrder = order, BackgroundTransparency = 0.5 }, "Border")
+	prow("power", "Unload", nil, function()
+		MX:CloseAllPopups()
+		win:Dialog({ Title = "Unload Script?", Content = "The UI closes completely. Run the script again to bring it back.", Buttons = { { Title = "Unload", Primary = true, Callback = function() MX:Destroy() end }, { Title = "Stay" } } })
+	end, true)
+
+	MX.Options.menu_key = {
+		Get = function() return MX.MenuKeyCode end,
+		Serialize = function() return KeyEncode(MX.MenuKeyCode) end,
+		Deserialize = function(_, v)
+			local k = KeyDecode(v)
+			MX:SetMenuKey(k)
+			refresh()
+		end,
+	}
+	table.insert(MX.Lang.Listeners, refresh)
+	Watch(f, refresh)
+	win.Profile = { frame = f, refresh = refresh, avatar = av, scaleSlider = scaleSlider }
+end
+
 local function RoundBox(frame, tok, a, side)
 	New("UICorner", { CornerRadius = UDim.new(0, 10) }, frame)
 	local top = Box(frame, { Size = UDim2.new(1, 0, 0, 14), ZIndex = 0 }, tok)
@@ -3858,7 +4928,7 @@ function MX:CreateWindow(o)
 	local bsz = Touch and 32 or 28
 	if o.Collapsible ~= false then
 		local cb, ch = PaletteButton(hl, "menu", 1, bsz)
-		ch.Activated:Connect(function() win:ToggleSidebar() end)
+		Tap(ch, function() win:ToggleSidebar() end)
 	end
 	local logo = MXLogo(hl, 24)
 	logo.LayoutOrder = 2
@@ -3872,6 +4942,7 @@ function MX:CreateWindow(o)
 		local sb = New("TextBox", { BackgroundTransparency = 1, Size = UDim2.new(1, -12, 1, 0), Position = UDim2.new(0, 8, 0, 0), Text = "", PlaceholderText = "Search...", ClearTextOnFocus = false, Font = FONT.Reg, TextSize = TS(13), TextXAlignment = LEFT }, sw)
 		Bind(sb, { TextColor3 = "Text", PlaceholderColor3 = "Sub" })
 		win.SearchBox = sb
+		Tr(sb, "Search...", "PlaceholderText")
 		local res = Box(main, { Size = UDim2.new(0, 280, 0, 0), AutomaticSize = AY, Visible = false, ZIndex = 30, Active = true }, "Card", 8, "Border")
 		Pad(res, 4, 4, 4, 4)
 		List(res, 2)
@@ -3894,7 +4965,7 @@ function MX:CreateWindow(o)
 					local h = Hit(it, 3)
 					h.MouseEnter:Connect(function() it.BackgroundColor3 = Theme.Hover it.BackgroundTransparency = 0.3 end)
 					h.MouseLeave:Connect(function() it.BackgroundTransparency = 1 end)
-					h.Activated:Connect(function()
+					Tap(h, function()
 						res.Visible = false
 						sb.Text = ""
 						win:_Goto(e)
@@ -3933,7 +5004,7 @@ function MX:CreateWindow(o)
 	table.insert(MX.LockListeners, paintLock)
 	Watch(lb, paintLock)
 	MX:Tip(lh, function() return MX.Locked and "Unlock UI" or "Lock UI" end)
-	lh.Activated:Connect(function()
+	Tap(lh, function()
 		MX:SetLocked(not MX.Locked)
 	end)
 	local gb, gh = PaletteButton(hr, "settings", 4, bsz)
@@ -3942,33 +5013,26 @@ function MX:CreateWindow(o)
 	gr.glass = gearMenu:AddToggle({ Title = "Glass", Description = "See-through window", Flag = "glass", Style = "Switch", Callback = function(v) MX:SetGlass(v) end })
 	gr.wm = gearMenu:AddToggle({ Title = "Watermark", Flag = "watermark", Style = "Switch", Default = true, Callback = function(v) if MX.Watermark then MX.Watermark:SetVisible(v) end end })
 	gr.kl = gearMenu:AddToggle({ Title = "Keybind List", Flag = "keybind_list", Style = "Switch", Callback = function(v) if MX.KeyList then MX.KeyList:SetVisible(v) end end })
-	gr.scale = gearMenu:AddSlider({ Title = "UI Scale", Flag = "ui_scale", Min = 0.6, Max = 1.4, Increment = 0.05, Default = MX.UserScale, Callback = function(v) win:SetScale(v) end })
 	gr.mob = gearMenu:AddToggle({ Title = "Mobile Button", Flag = "mobile_button", Style = "Switch", Callback = function(v) win:SetMobileButton(v) end })
 	gr.lock = gearMenu:AddToggle({ Title = "Lock UI", Description = "Stops windows and buttons from being moved", Flag = "ui_locked", Style = "Switch", Callback = function(v) MX:SetLocked(v) end })
-	gearMenu:AddKeybind({ Title = "Menu Key", Flag = "menu_key", Default = Enum.KeyCode.RightShift, MenuKey = true })
 	if MX.Discord then
 		gearMenu:AddButton({ Title = "Copy Discord Invite", Callback = function()
 			local ok = Copy(MX.Discord)
 			MX:Notify({ Type = ok and "Success" or "Warning", Title = ok and "Copied" or "Not Supported", Content = ok and MX.Discord or "Your executor has no clipboard.", Duration = 2 })
 		end })
 	end
-	gearMenu:AddButton({ Title = "Unload Script", Description = "Removes the UI and everything it created", Callback = function()
-		MX:CloseAllPopups()
-		win:Dialog({ Title = "Unload Script?", Content = "The UI closes completely. Run the script again to bring it back.", Buttons = { { Title = "Unload", Primary = true, Callback = function() MX:Destroy() end }, { Title = "Stay" } } })
-	end })
-	gh.Activated:Connect(function()
+	Tap(gh, function()
 		gr.glass:Set(MX.Glass, true)
 		gr.wm:Set(MX.Watermark ~= nil and MX.Watermark.Visible or false, true)
 		gr.kl:Set(MX.KeyList ~= nil and MX.KeyList.Visible or false, true)
-		gr.scale:Set(MX.UserScale, true)
 		gr.mob:Set(win.MobileBtn ~= nil, true)
 		gr.lock:Set(MX.Locked, true)
 		ShowMenu(gearMenu, gearFrame, gb)
 	end)
 	local mb, mh = PaletteButton(hr, "minus", 5, bsz)
-	mh.Activated:Connect(function() win:Toggle(false) end)
+	Tap(mh, function() win:Toggle(false) end)
 	local xb, xh = PaletteButton(hr, "x", 6, bsz)
-	xh.Activated:Connect(function()
+	Tap(xh, function()
 		win:Dialog({ Title = "Unload MX?", Content = "The UI closes completely. Run the script again to bring it back.", Buttons = { { Title = "Unload", Primary = true, Callback = function() MX:Destroy() end }, { Title = "Stay" } } })
 	end)
 
@@ -4002,18 +5066,27 @@ function MX:CreateWindow(o)
 		local pf = Box(sidebar, { Size = UDim2.new(1, 0, 0, profileH), AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 0, 1, 0) }, "Panel")
 		GlassOn(pf, 0.4)
 		Box(pf, { Size = UDim2.new(1, -16, 0, 1), Position = UDim2.new(0, 8, 0, 0), BackgroundTransparency = 0.5 }, "Border")
-		local av = New("ImageLabel", { Size = UDim2.fromOffset(32, 32), Position = UDim2.new(0, 12, 0.5, -16), BackgroundTransparency = 0, BorderSizePixel = 0, Image = "" }, pf)
+		local av = New("ImageLabel", { Size = UDim2.fromOffset(32, 32), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0, 28, 0.5, 0), BackgroundTransparency = 0, BorderSizePixel = 0, Image = "" }, pf)
 		Bind(av, { BackgroundColor3 = "Element" })
 		New("UICorner", { CornerRadius = UDim.new(1, 0) }, av)
 		task.spawn(function()
 			local ok, img = pcall(function() return Players:GetUserThumbnailAsync(LocalPlayer.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size48x48) end)
-			if ok and av.Parent then av.Image = img end
+			if ok and av.Parent then
+				av.Image = img
+				if win.Profile and win.Profile.avatar then win.Profile.avatar.Image = img end
+			end
 		end)
-		local nf = New("Frame", { BackgroundTransparency = 1, Position = UDim2.new(0, 52, 0, 0), Size = UDim2.new(1, -58, 1, 0) }, pf)
+		local nf = New("Frame", { BackgroundTransparency = 1, Position = UDim2.new(0, 52, 0, 0), Size = UDim2.new(1, -84, 1, 0) }, pf)
 		List(nf, 0, Enum.FillDirection.Vertical, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
 		Lbl(nf, { Text = LocalPlayer.DisplayName, Size = UDim2.new(1, 0, 0, 16), TextSize = 13, Font = FONT.Bold, TextTruncate = Enum.TextTruncate.AtEnd, LayoutOrder = 1 })
 		Lbl(nf, { Text = "@" .. LocalPlayer.Name, Size = UDim2.new(1, 0, 0, 14), TextSize = 11, Font = FONT.Reg, TextTruncate = Enum.TextTruncate.AtEnd, LayoutOrder = 2 }, "Sub")
-		win.ProfileName = nf
+		local arrow = MakeIcon(pf, "chevron-right", 14, "Sub")
+		arrow.AnchorPoint = Vector2.new(1, 0.5)
+		arrow.Position = UDim2.new(1, -12, 0.5, 0)
+		local ph = Hit(pf, 4)
+		Hover(ph, pf, "Panel", "Hover")
+		Tap(ph, function() win:OpenProfile() end)
+		win.ProfileName, win.ProfileAvatar, win.ProfileArrow, win.ProfileCard = nf, av, arrow, pf
 	end
 
 	local content = Box(main, { Position = UDim2.new(0, win.TabWidth, 0, HH), Size = UDim2.new(1, -win.TabWidth, 1, -HH), ClipsDescendants = true }, "Panel")
@@ -4063,6 +5136,8 @@ function MX:CreateWindow(o)
 	if mbOpt == true or type(mbOpt) == "table" or (mbOpt == "Auto" and Touch) then
 		win:SetMobileButton(true, type(mbOpt) == "table" and mbOpt or nil)
 	end
+	win:_BuildProfile()
+	win:_ApplySide()
 	return win
 end
 
@@ -4132,7 +5207,7 @@ function Window:SetMobileButton(on, opts)
 			draginput = input
 		end
 	end)
-	hit.Activated:Connect(function()
+	Tap(hit, function()
 		if moved then return end
 		self:Toggle()
 	end)
@@ -4142,6 +5217,7 @@ end
 
 function MX:Destroy()
 	if MX.Dead then return end
+	if MX.AutoSave and MX.LoadedConfig then pcall(function() MX:SaveConfig(MX.LoadedConfig) end) end
 	MX.Dead = true
 	for _, c in ipairs(Conns) do pcall(function() c:Disconnect() end) end
 	if Blur then Blur:Destroy() Blur = nil end
@@ -4324,7 +5400,7 @@ function MX:CreateKeybindList(o)
 					Lbl(r, { Text = "[" .. KeyLabel(b.Key) .. "] " .. string.sub(b.Mode or "", 1, 1), Position = UDim2.new(1, -60, 0, 0), Size = UDim2.new(0, 60, 1, 0), TextSize = 11, TextXAlignment = RIGHT, Font = FONT.Mono }, "Sub")
 					if Touch then
 						local h = Hit(r, 3)
-						h.Activated:Connect(function() b:Trigger() end)
+						Tap(h, function() b:Trigger() end)
 					end
 				end
 			end
@@ -4419,7 +5495,7 @@ function MX:AddWindow(o)
 		xh.Size = UDim2.fromOffset(32, 30)
 		xh.AnchorPoint = Vector2.new(1, 0)
 		xh.Position = UDim2.new(1, 0, 0, 0)
-		xh.Activated:Connect(function()
+		Tap(xh, function()
 			if o.OnClose then task.spawn(o.OnClose, handle) end
 			if o.DestroyOnClose then handle:Destroy() else f.Visible = false end
 		end)
@@ -4604,12 +5680,31 @@ function Window:AddSettingsTab(o)
 	if self._settingsTab then return self._settingsTab end
 	o = o or {}
 	local tab = self:AddTab({ Title = o.Title or "Settings", Icon = "settings" })
-	local theme = tab:AddSection({ Title = "Theme", Icon = "palette" })
-	theme:AddDropdown({ Title = "Theme", Description = "Colors of the whole UI", Flag = "theme", Values = MX.ThemeOrder, Default = MX.ThemeName, Callback = function(n) MX:SetTheme(n) end })
-	local fx = tab:AddSection({ Title = "Effects", Icon = "wand-2" })
+	local theme = tab:AddSection({ Title = "Theme", Icon = "palette", Side = "Left" })
+	theme:AddDropdown({ Title = "Preset", Description = "Colors of the whole UI", Flag = "theme", Values = MX.ThemeOrder, Default = MX.ThemeName, Callback = function(n) MX:SetTheme(n) end })
+	theme:AddColorPicker({ Title = "Accent", Flag = "accent", Default = MX.Theme.Accent, NoRainbow = true, Callback = function(c) MX:SetAccent(c) end })
+	local nameT = theme:AddTextbox({ Title = "Theme Name", Placeholder = "theme name", Flag = "_theme_name" })
+	local custom
+	theme:AddButton({ Title = "Create Theme", Callback = function()
+		local n = MX:CreateTheme(nameT:Get())
+		if n then
+			nameT:Set("", true)
+			MX:Notify({ Type = "Success", Title = "Theme", Content = n, Duration = 2 })
+			if custom then custom:Set(n, true) end
+		else
+			MX:Notify({ Type = "Warning", Title = "Theme", Content = "Theme Name", Duration = 2 })
+		end
+	end })
+	custom = theme:AddDropdown({ Title = "Custom Themes", Values = MX:GetCustomThemes(), Placeholder = "no themes", Flag = "_theme_custom", Callback = function(n) MX:SetTheme(n) end })
+	theme:AddButton({ Title = "Delete Theme", Description = "Hold to delete", Hold = 1, Callback = function()
+		local n = custom:Get()
+		if n then MX:DeleteTheme(n) end
+	end })
+	table.insert(MX.CustomListeners, function() custom:Refresh(MX:GetCustomThemes()) end)
+	local fx = tab:AddSection({ Title = "Effects", Icon = "wand-2", Side = "Left" })
 	fx:AddDropdown({ Title = "Effect", Description = "Animation behind the menu", Flag = "effect", Values = MX.EffectList, Default = self:GetEffect(), Search = false, Callback = function(n) self:SetEffect(n) end })
 	fx:AddSlider({ Title = "Intensity", Flag = "effect_intensity", Min = 0.5, Max = 2, Increment = 0.1, Default = self.FXScale or 1, Callback = function(v) self:SetEffectIntensity(v) end })
-	local cfg = tab:AddSection({ Title = "Configs", Icon = "folder", Side = "Full" })
+	local cfg = tab:AddSection({ Title = "Configs", Icon = "folder", Side = "Right" })
 	cfg:AddConfigManager()
 	self._settingsTab = tab
 	return tab
