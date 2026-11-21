@@ -494,9 +494,9 @@ local lib = MEOW_BUILD()
 
 local MX = {}
 do
-    local BASE = "https://raw.githubusercontent.com/MXHUBOFCL/GAME/main/ViolenceDistrict/"
-    local FOLDER = "MXHUB/ViolenceDistrict"
-    local NAMES = {"AssistFree", "AutoAttack", "AutoDisarm", "CopyAvatar", "Emote", "FakeLag", "FakeParry", "Heal", "KillerAbilities", "KillerESP", "PerkInfo", "Perks", "Pumpkin", "ToF", "TrapESP"}
+    local BASE = "https://raw.githubusercontent.com/MXHUBOFCL/GAME/refs/heads/main/VD/"
+    local FOLDER = "MXHUB/VD"
+    local NAMES = {"AssistFree", "AutoAttack", "AutoDisarm", "CopyAvatar", "Emote", "FakeLag", "FakeParry", "Heal", "KillerAbilities", "KillerESP", "PerkInfo", "Perks", "Pumpkin", "ToF", "Tracker", "TrapESP"}
     local results, pending = {}, {}
     local canFile = type(writefile) == "function" and type(readfile) == "function" and type(isfile) == "function"
     if canFile and type(makefolder) == "function" and type(isfolder) == "function" then
@@ -641,6 +641,20 @@ do
             end)
         end
 
+        local function sync(stateAttr, idAttr, on, id)
+            local char = character()
+            local script = char and char:FindFirstChild("CheckInterractable")
+            if not script then
+                return
+            end
+            pcall(function()
+                if on then
+                    script:SetAttribute(idAttr, id)
+                end
+                script:SetAttribute(stateAttr, on)
+            end)
+        end
+
         function N.repair(point, on)
             if not point then
                 return false
@@ -655,6 +669,7 @@ do
                 ids[point] = ids[point] or guid()
                 N.active[point] = nil
             end
+            sync("isRepairing", "RepairRequestId", on == true, ids[point])
             return fire(remote("Generator", "RepairEvent"), point, on == true, nil, ids[point], character())
         end
 
@@ -672,6 +687,7 @@ do
                 ids[target] = ids[target] or guid()
                 N.active[target] = nil
             end
+            sync("isHealing", "HealRequestId", on == true, ids[target])
             return fire(remote("Healing", "HealEvent"), target, on == true, ids[target], character())
         end
 
@@ -3120,44 +3136,41 @@ do
     end
 
     local function fn24()
-        local v4 = fn23()
-
-        if v4 and v4:IsA("GuiObject") and v4.Visible and type(firesignal) == "function" then
-            pcall(function()
-                firesignal(v4.MouseButton1Down)
-                task.wait(0.005)
-                firesignal(v4.MouseButton1Up)
-            end)
-
-            return true
-        end
-
-        if v4 and v4:IsA("GuiObject") and v4.Visible then
-            pcall(function()
-                local absolutePosition = v4.AbsolutePosition
-                local absoluteSize = v4.AbsoluteSize
-                local guiInset = GuiService:GetGuiInset()
-                local n3 = 8822 + math.random(1, 9999)
-                VirtualInputManager:SendTouchEvent(n3, 0, absolutePosition.X + absoluteSize.X / 2 + guiInset.X, absolutePosition.Y + absoluteSize.Y / 2 + guiInset.Y)
-                task.wait(0.005)
-                VirtualInputManager:SendTouchEvent(n3, 2, absolutePosition.X + absoluteSize.X / 2 + guiInset.X, absolutePosition.Y + absoluteSize.Y / 2 + guiInset.Y)
-            end)
-
-            return true
+        local button = fn23()
+        if button and button:IsA("GuiObject") then
+            local fired = false
+            if type(firesignal) == "function" then
+                fired = pcall(function()
+                    firesignal(button.MouseButton1Down)
+                end)
+                pcall(function()
+                    firesignal(button.MouseButton1Up)
+                end)
+            end
+            if not fired and type(getconnections) == "function" then
+                pcall(function()
+                    for _, connection in ipairs(getconnections(button.MouseButton1Down)) do
+                        connection:Fire()
+                    end
+                    fired = true
+                end)
+            end
+            if fired then
+                return true
+            end
         end
 
         pcall(function()
-
             local raw = localPlayer:GetAttribute("kb_skillcheck")
             if typeof(raw) ~= "string" or raw == "" then
                 raw = "Space"
             end
             local mouseIndex = raw:match("^MouseButton(%d)$")
             if mouseIndex then
-                local button = tonumber(mouseIndex) - 1
-                VirtualInputManager:SendMouseButtonEvent(0, 0, button, true, game, 0)
+                local mouseButton = tonumber(mouseIndex) - 1
+                VirtualInputManager:SendMouseButtonEvent(0, 0, mouseButton, true, game, 0)
                 task.wait(0.005)
-                VirtualInputManager:SendMouseButtonEvent(0, 0, button, false, game, 0)
+                VirtualInputManager:SendMouseButtonEvent(0, 0, mouseButton, false, game, 0)
                 return
             end
             local okKey, keyCode = pcall(function()
@@ -3783,10 +3796,11 @@ do
 
                 local ka = _G.Ox.KAim
                 if ka and ka.flaskOn and ka.flaskRemote and arg == ka.flaskRemote and v8 == "FireServer" then
-                    local ok, d1, d2, d3, d4 = pcall(ka.flask, ...)
+                    local ok, d1 = pcall(ka.flask, ...)
                     if ok and d1 then
+                        local rest = table.pack(select(2, ...))
                         setnamecallmethod(v8)
-                        return namecall(arg, d1, d2, d3, d4)
+                        return namecall(arg, d1, table.unpack(rest, 1, rest.n))
                     end
                 end
 
@@ -3829,11 +3843,28 @@ do
                     end
                 end
 
-                if arg.ClassName == "RemoteEvent" and arg.Name == "Spearthrow" and _G.Ox.AimConfig.Aim_SilentVeilV2 and typeof((...)) == "table" then
-                    local okAim, newPayload = pcall(veilAimPayload, (...))
-                    if okAim and newPayload then
+                if arg.ClassName == "RemoteEvent" and arg.Name == "Spearthrow" and typeof((...)) == "table" then
+                    local payload = (...)
+                    if _G.Ox.AimConfig.Aim_SilentVeilV2 then
+                        local okAim, newPayload = pcall(veilAimPayload, payload)
+                        if okAim and newPayload then
+                            payload = newPayload
+                        end
+                    end
+                    local tracker = _G.Ox.Tracker
+                    if tracker and tracker.spearOn then
+                        pcall(function()
+                            local speedNow = SPEAR_MAX_SPEED
+                            local started = chargeStart[payload.Sequence]
+                            if started and typeof(payload.ReleasedAt) == "number" then
+                                speedNow = math.clamp((payload.ReleasedAt - started) * SPEAR_MAX_SPEED, 1, SPEAR_MAX_SPEED)
+                            end
+                            tracker.spear(payload.Origin, payload.Direction, speedNow)
+                        end)
+                    end
+                    if payload ~= (...) then
                         setnamecallmethod(v8)
-                        return namecall(arg, newPayload)
+                        return namecall(arg, payload)
                     end
                 end
 
@@ -8820,7 +8851,7 @@ MX.run("Pumpkin", {CollectionService = CollectionService, PumpkinCard = PumpkinC
 
                             local from, to, centre = 96, 140, 109
                             if not perfectWanted then
-                                from, to, centre = 120, 150, 128
+                                from, to, centre = 119, 137, 128
                             end
 
                             if cycleMode == "Instant" or (rel >= from and rel <= to) then
@@ -8881,6 +8912,7 @@ MX.run("AssistFree", {CollectionService = CollectionService, Players = Players, 
 MX.run("TrapESP", {CollectionService = CollectionService, localPlayer = localPlayer})
 
 MX.run("ToF", {CollectionService = CollectionService, CoreGui = CoreGui, IsDowned = function(...) return IsDowned(...) end, PistolSection = PistolSection, Players = Players, ReplicatedStorage = ReplicatedStorage, RunService = RunService, UserInputService = UserInputService, localPlayer = localPlayer, playerGui = playerGui})
+MX.run("Tracker", {PistolSection = PistolSection, Players = Players, ReplicatedStorage = ReplicatedStorage, RunService = RunService, VeilCard = VeilCard, lib = lib, localPlayer = localPlayer})
     AbilityCard:AddToggle("Auto Crouch (Dodge Abyssal S1)", false, function(autoCrouch)
         _G.Ox.ParryConfig.AutoCrouch = autoCrouch
     end, {Flag = "AutoCrouch"})
