@@ -35,7 +35,6 @@ local MX = {
 	LogoId = 105865788976884,
 	WelcomeImage = 113267102798729,
 	ConfigFolder = "MXUI",
-	Glass = false,
 	UserScale = 1,
 	Scale = 1,
 	NotifyEnabled = true,
@@ -129,7 +128,7 @@ setmetatable(MX.Options, {
 })
 
 local Theme = {}
-local Reg, GlassReg = {}, {}
+local Reg = {}
 MX.Theme = Theme
 
 function MX._NormalizeTheme(d)
@@ -259,11 +258,6 @@ local function Bind(o, map)
 		PruneAt = math.max(600, w * 2)
 	end
 end
-local function GlassOn(o, a)
-	GlassReg[#GlassReg + 1] = { o = o, a = a }
-	if MX.Glass then o.BackgroundTransparency = a end
-end
-
 local function Box(parent, props, tok, rad, stroke)
 	props = props or {}
 	props.BorderSizePixel = 0
@@ -1431,6 +1425,31 @@ do
 	Pad(Tip, 5, 8, 5, 8)
 	TipText = Lbl(Tip, { Size = UDim2.new(0, 0, 0, 0), AutomaticSize = AXY, TextSize = 12, TextWrapped = false })
 end
+function MX._KeepOn(frame)
+	local busy = false
+	local function fix()
+		if busy or not frame.Parent or not frame.Visible then return end
+		busy = true
+		task.defer(function()
+			busy = false
+			if not frame.Parent then return end
+			local gp, gs = Gui.AbsolutePosition, Gui.AbsoluteSize
+			local ap, az = frame.AbsolutePosition, frame.AbsoluteSize
+			local dx, dy = 0, 0
+			if ap.X < gp.X + 4 then dx = gp.X + 4 - ap.X elseif ap.X + az.X > gp.X + gs.X - 4 then dx = gp.X + gs.X - 4 - ap.X - az.X end
+			if ap.Y < gp.Y + 4 then dy = gp.Y + 4 - ap.Y elseif ap.Y + az.Y > gp.Y + gs.Y - 4 then dy = gp.Y + gs.Y - 4 - ap.Y - az.Y end
+			if math.abs(dx) > 0.5 or math.abs(dy) > 0.5 then
+				local p = frame.Position
+				frame.Position = UDim2.new(p.X.Scale, p.X.Offset + dx, p.Y.Scale, p.Y.Offset + dy)
+			end
+		end)
+	end
+	frame:GetPropertyChangedSignal("AbsoluteSize"):Connect(fix)
+	frame:GetPropertyChangedSignal("AbsolutePosition"):Connect(fix)
+	frame:GetPropertyChangedSignal("Visible"):Connect(fix)
+	fix()
+end
+
 function MX:Tip(o, text)
 	if Touch then return end
 	local function move()
@@ -1449,9 +1468,11 @@ function MX:Tip(o, text)
 end
 
 local PopStack = {}
+local PopClosed = setmetatable({}, { __mode = "k" })
 function MX:ClosePopup()
 	local p = table.remove(PopStack)
 	if not p then return end
+	if p.anchor then PopClosed[p.anchor] = os.clock() end
 	if p.conn then p.conn:Disconnect() end
 	p.frame.Visible = false
 	if p.destroy then p.frame:Destroy() end
@@ -1492,6 +1513,11 @@ local function PlacePopup(p)
 end
 function MX:ShowPopup(f, anchor, opts)
 	opts = opts or {}
+	local ct = anchor and PopClosed[anchor]
+	if ct and os.clock() - ct < 0.45 then
+		if opts.Destroy then f:Destroy() end
+		return
+	end
 	for i = #PopStack, 1, -1 do
 		if PopStack[i].frame == f then
 			local old = table.remove(PopStack, i)
@@ -1671,8 +1697,8 @@ local function PingColor(v) return v <= 90 and Theme.Success or (v <= 160 and Th
 local function Hex(c) return string.format("#%02x%02x%02x", math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5)) end
 
 local NoteHolder = New("Frame", {
-	Name = "Notes", BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.new(0, Mobile and 250 or 280, 0, 0), AutomaticSize = AY,
-	AnchorPoint = Vector2.new(0, 0), Position = UDim2.new(0, 10, 0, 8),
+	Name = "Notes", BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.new(0, Mobile and 200 or 230, 0, 0), AutomaticSize = AY,
+	AnchorPoint = Vector2.new(0, 0), Position = UDim2.new(0, 6, 0, 6),
 }, NoteLayer)
 List(NoteHolder, 8, Enum.FillDirection.Vertical, Enum.HorizontalAlignment.Left)
 Scaled(NoteHolder)
@@ -1881,20 +1907,6 @@ function MX:RefreshConfigs()
 end
 MX.Utils.Copy = function(t) return Copy(t) end
 
-function MX:_UpdateBlur() end
-
-function MX:SetGlass(v)
-	MX.Glass = v and true or false
-	for i = #GlassReg, 1, -1 do
-		local e = GlassReg[i]
-		if e.o.Parent then Tween(e.o, { BackgroundTransparency = MX.Glass and e.a or 0 }, 0.25) else table.remove(GlassReg, i) end
-	end
-	if MX.Options.glass and MX.Options.glass.Value ~= MX.Glass then MX.Options.glass:Set(MX.Glass, true) end
-	MX:_UpdateBlur()
-end
-function MX:GetGlass() return MX.Glass end
-function MX:SetGlassBlur() end
-function MX:SetBlurSize() end
 
 MX.ThemeListeners = {}
 local function Watch(inst, fn)
@@ -2087,7 +2099,6 @@ local LangID = {
 	["Create Language"] = "Buat Bahasa",
 	["New Language"] = "Bahasa Baru",
 	["Quick Settings"] = "Pengaturan Cepat",
-	["Glass"] = "Kaca",
 	["See-through window"] = "Jendela transparan",
 	["Watermark"] = "Watermark",
 	["Keybind List"] = "Daftar Keybind",
@@ -3227,6 +3238,7 @@ function Container:AddToggle(o, def, cb)
 			if switch then Tween(track, { BackgroundColor3 = col }, 0.15) end
 		end
 		if switch then
+			knob.BackgroundColor3 = on and Theme.OnAccent or Theme.Sub
 			local p = on and UDim2.new(1, -17, 0.5, -7) or UDim2.new(0, 3, 0.5, -7)
 			if instant then
 				stop(knob, "Position")
@@ -3626,12 +3638,12 @@ end
 
 function ListPopup(anchor, cfg)
 	local vals = cfg.Values
-	local itemH = Touch and 36 or 30
+	local itemH = Touch and 30 or 26
 	local showSearch = cfg.Search ~= false
 	local rows = math.max(1, math.min(#vals, Touch and 5 or 6))
 	local listH = rows * itemH + (rows - 1) * 2
-	local w = math.max(cfg.Width or 160, cfg.Multi and 190 or 130)
-	local h = 12 + listH + (showSearch and 36 or 0) + (cfg.Header and 34 or 0) + (cfg.Title and 22 or 0) + (cfg.Footer and (itemH + 6) or 0)
+	local w = math.max(cfg.Width or 150, cfg.Multi and 170 or 120)
+	local h = 12 + listH + (showSearch and 34 or 0) + (cfg.Header and 32 or 0) + (cfg.Title and 22 or 0) + (cfg.Footer and (itemH + 6) or 0)
 	local f = NewPopupFrame(w, h)
 	Pad(f, 6, 6, 6, 6)
 	List(f, 6)
@@ -3641,7 +3653,7 @@ function ListPopup(anchor, cfg)
 	local paintAll
 	local search
 	if showSearch then
-		local sb = Box(f, { Size = UDim2.new(1, 0, 0, 30), LayoutOrder = 1 }, "Element", 8)
+		local sb = Box(f, { Size = UDim2.new(1, 0, 0, 28), LayoutOrder = 1 }, "Element", 7)
 		local si = MakeIcon(sb, "search", 14, "Sub")
 		si.AnchorPoint = Vector2.new(0, 0.5)
 		si.Position = UDim2.new(0, 10, 0.5, 0)
@@ -3649,7 +3661,7 @@ function ListPopup(anchor, cfg)
 		Bind(search, { TextColor3 = "Text", PlaceholderColor3 = "Sub" })
 	end
 	if cfg.Header then
-		local hr = New("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 28), LayoutOrder = 2 }, f)
+		local hr = New("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 26), LayoutOrder = 2 }, f)
 		List(hr, 6, Enum.FillDirection.Horizontal)
 		local function hb(text, all)
 			local b = Box(hr, { Size = UDim2.new(0.5, -3, 1, 0), LayoutOrder = all and 1 or 2 }, "Element", 8)
@@ -4363,7 +4375,6 @@ local function NewSection(parent, base, o)
 	local headless = o.NoHeader or title == ""
 	if o.Collapsible == nil and not headless then o.Collapsible = true end
 	local card = Box(parent, { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY, LayoutOrder = base.order or 0, ClipsDescendants = true }, "Card", 8, "Border")
-	GlassOn(card, 0.35)
 	List(card, 0)
 	local sec = setmetatable({ Frame = card, Win = base.Win, Owner = base.Owner, NoIndex = base.NoIndex, SecTitle = title, Up = base.Up, Collapsed = false, ToggleValue = o.Default and true or false }, SectionMT)
 	sec.SecObj = sec
@@ -4792,7 +4803,6 @@ function Window:Toggle(state)
 		end)
 	end
 	self:_UpdateMobileBtn()
-	MX:_UpdateBlur()
 end
 function Window:IsOpen() return self.Open end
 function Window:Show() self:Toggle(true) end
@@ -5022,11 +5032,6 @@ function Window:SetEffect(name)
 	if MX.Options.effect and MX.Options.effect.Value ~= name then MX.Options.effect:Set(name, true) end
 end
 function Window:GetEffect() return self.Effect or "None" end
-function Window:SetEffectIntensity(v)
-	local map = { Low = 0.5, Medium = 1, High = 1.8 }
-	self.FXScale = map[v] or math.clamp(tonumber(v) or 1, 0.3, 3)
-	if self.Effect and self.Effect ~= "None" then self:SetEffect(self.Effect) end
-end
 function Window:SetStars(v) self:SetEffect(v and "Stars" or "None") end
 function Window:GetStars() return self.Effect == "Stars" end
 
@@ -5081,30 +5086,30 @@ end
 function Window:_BuildProfile()
 	local win = self
 	if not win.ProfileCard then return end
-	local f = NewPopupFrame(250, nil)
-	Pad(f, 8, 8, 8, 8)
+	local f = NewPopupFrame(200, nil)
+	Pad(f, 6, 6, 6, 6)
 	List(f, 3)
 	local values = {}
 	local function refresh()
 		for _, e in ipairs(values) do e[1].Text = e[2]() end
 		if win.ProfileAvatar and win.Profile and win.Profile.avatar then win.Profile.avatar.Image = win.ProfileAvatar.Image end
 	end
-	local hd = New("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 46), LayoutOrder = 1 }, f)
-	local av = New("ImageLabel", { Size = UDim2.fromOffset(34, 34), Position = UDim2.new(0, 6, 0.5, -17), BackgroundTransparency = 0, BorderSizePixel = 0, Image = win.ProfileAvatar and win.ProfileAvatar.Image or "" }, hd)
+	local hd = New("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 38), LayoutOrder = 1 }, f)
+	local av = New("ImageLabel", { Size = UDim2.fromOffset(28, 28), Position = UDim2.new(0, 4, 0.5, -14), BackgroundTransparency = 0, BorderSizePixel = 0, Image = win.ProfileAvatar and win.ProfileAvatar.Image or "" }, hd)
 	Bind(av, { BackgroundColor3 = "Element" })
 	New("UICorner", { CornerRadius = UDim.new(1, 0) }, av)
-	Lbl(hd, { Text = LocalPlayer.DisplayName, Position = UDim2.new(0, 50, 0, 6), Size = UDim2.new(1, -56, 0, 18), TextSize = 14, Font = FONT.Bold, TextTruncate = Enum.TextTruncate.AtEnd })
-	Lbl(hd, { Text = "@" .. LocalPlayer.Name, Position = UDim2.new(0, 50, 0, 24), Size = UDim2.new(1, -56, 0, 14), TextSize = 11, Font = FONT.Reg, TextTruncate = Enum.TextTruncate.AtEnd }, "Sub")
+	Lbl(hd, { Text = LocalPlayer.DisplayName, Position = UDim2.new(0, 38, 0, 4), Size = UDim2.new(1, -42, 0, 16), TextSize = 13, Font = FONT.Bold, TextTruncate = Enum.TextTruncate.AtEnd })
+	Lbl(hd, { Text = "@" .. LocalPlayer.Name, Position = UDim2.new(0, 38, 0, 21), Size = UDim2.new(1, -42, 0, 13), TextSize = 10, Font = FONT.Reg, TextTruncate = Enum.TextTruncate.AtEnd }, "Sub")
 	Box(f, { Size = UDim2.new(1, 0, 0, 1), LayoutOrder = 2, BackgroundTransparency = 0.5 }, "Border")
 	local order = 2
 	local function prow(icon, key, valueFn, onTap, red)
 		order += 1
-		local r = New("Frame", { Size = UDim2.new(1, 0, 0, Touch and 38 or 34), LayoutOrder = order, BackgroundTransparency = 1, BorderSizePixel = 0 }, f)
+		local r = New("Frame", { Size = UDim2.new(1, 0, 0, Touch and 32 or 28), LayoutOrder = order, BackgroundTransparency = 1, BorderSizePixel = 0 }, f)
 		New("UICorner", { CornerRadius = UDim.new(0, 7) }, r)
-		local ic = MakeIcon(r, icon, 16, red and "Danger" or "Sub")
+		local ic = MakeIcon(r, icon, 14, red and "Danger" or "Sub")
 		ic.AnchorPoint = Vector2.new(0, 0.5)
-		ic.Position = UDim2.new(0, 10, 0.5, 0)
-		Lbl(r, { Text = key, Position = UDim2.new(0, 36, 0, 0), Size = UDim2.new(0.5, -36, 1, 0), TextSize = 13, Tr = true }, red and "Danger" or "Text")
+		ic.Position = UDim2.new(0, 8, 0.5, 0)
+		Lbl(r, { Text = key, Position = UDim2.new(0, 30, 0, 0), Size = UDim2.new(0.5, -30, 1, 0), TextSize = 12, Tr = true }, red and "Danger" or "Text")
 		if valueFn then
 			local v = Lbl(r, { Text = valueFn(), AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -28, 0, 0), Size = UDim2.new(0.5, -30, 1, 0), TextXAlignment = RIGHT, TextSize = 12, Font = FONT.Reg, TextTruncate = Enum.TextTruncate.AtEnd }, "Sub")
 			values[#values + 1] = { v, valueFn }
@@ -5121,12 +5126,6 @@ function Window:_BuildProfile()
 		Tap(h, function() onTap(r) end)
 		return r
 	end
-
-	local scaleMenu, scaleFrame = MakeMenu("Menu Scale", 230)
-	local scaleSlider = scaleMenu:AddSlider({ Title = "Menu Scale", Flag = "ui_scale", Min = 60, Max = 140, Increment = 1, Default = 100, Suffix = "%", Callback = function(v)
-		win:SetScale(v / 100)
-		refresh()
-	end })
 
 	local function openNew(anchor)
 		ListPopup(anchor, {
@@ -5157,10 +5156,6 @@ function Window:_BuildProfile()
 	end
 	local keyRow
 	prow("globe", "Language", function() return MX.Lang.Current end, openLanguage)
-	prow("maximize-2", "Menu Scale", function() return MX.UserScale == 1 and MX:T("Auto") or (math.floor(MX.UserScale * 100 + 0.5) .. "%") end, function(r)
-		scaleSlider:Set(MX.UserScale * 100, true)
-		ShowMenu(scaleMenu, scaleFrame, r, "Right")
-	end)
 	prow("palette", "Theme", function() return MX.ThemeName end, function(r)
 		ListPopup(r, {
 			Values = allThemes(), Search = true, Width = 200, Placement = "Right",
@@ -5198,20 +5193,18 @@ function Window:_BuildProfile()
 	}
 	table.insert(MX.Lang.Listeners, refresh)
 	Watch(f, refresh)
-	win.Profile = { frame = f, refresh = refresh, avatar = av, scaleSlider = scaleSlider }
+	win.Profile = { frame = f, refresh = refresh, avatar = av }
 end
 
 local function RoundBox(frame, tok, a, side)
 	New("UICorner", { CornerRadius = UDim.new(0, 10) }, frame)
 	local top = Box(frame, { Size = UDim2.new(1, 0, 0, 14), ZIndex = 0 }, tok)
-	GlassOn(top, a)
 	local edge
 	if side == "left" then
 		edge = Box(frame, { Size = UDim2.new(0, 14, 1, 0), AnchorPoint = Vector2.new(1, 0), Position = UDim2.fromScale(1, 0), ZIndex = 0 }, tok)
 	else
 		edge = Box(frame, { Size = UDim2.new(0, 14, 1, 0), ZIndex = 0 }, tok)
 	end
-	GlassOn(edge, a)
 end
 
 function MX:CreateWindow(o)
@@ -5231,19 +5224,15 @@ function MX:CreateWindow(o)
 	win.SearchWidth = o.SearchWidth or 160
 	win.HH = Touch and 42 or 38
 	if o.Theme and MX.Themes[o.Theme] then MX:SetTheme(o.Theme, true) end
-	if o.Glass then MX:SetGlass(true) end
 	if o.ToggleKeys then MX:_SetMenuKeys(o.ToggleKeys) elseif o.ToggleKey then MX:_SetMenuKeys({ Enum.KeyCode.Insert, o.ToggleKey }) end
 
 	local main = Box(WinLayer, { Name = "Main", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, TopInset() / 2), Size = UDim2.fromOffset(win.BaseW, win.BaseH), ClipsDescendants = true }, "Window", 10, "Border")
-	GlassOn(main, 0.15)
 	win.Main = main
 	win.ScaleObj = Scaled(main)
 	local HH = win.HH
 
 	local header = Box(main, { Size = UDim2.new(1, 0, 0, HH), ZIndex = 3 }, "Panel", 10)
-	GlassOn(header, 0.2)
 	local hfill = Box(header, { Size = UDim2.new(1, 0, 0, 12), Position = UDim2.new(0, 0, 1, -12) }, "Panel")
-	GlassOn(hfill, 0.2)
 	local hline = Box(header, { Size = UDim2.new(1, 0, 0, 1), Position = UDim2.new(0, 0, 1, -1) }, "Border")
 	hline.BackgroundTransparency = 0.5
 	local hl = New("Frame", { BackgroundTransparency = 1, Size = UDim2.new(0, 0, 1, 0), AutomaticSize = AX, Position = UDim2.new(0, 8, 0, 0), ZIndex = 4 }, header)
@@ -5333,13 +5322,11 @@ function MX:CreateWindow(o)
 	local gb, gh = PaletteButton(hr, "settings", 4, bsz)
 	local gearMenu, gearFrame = MakeMenu("Quick Settings", 240)
 	local gr = {}
-	gr.glass = gearMenu:AddToggle({ Title = "Glass", Description = "See-through window", Flag = "glass", Style = "Switch", Callback = function(v) MX:SetGlass(v) end })
 	gr.wm = gearMenu:AddToggle({ Title = "Watermark", Flag = "watermark", Style = "Switch", Default = true, Callback = function(v) if MX.Watermark then MX.Watermark:SetVisible(v) end end })
 	gr.kl = gearMenu:AddToggle({ Title = "Keybind List", Flag = "keybind_list", Style = "Switch", Callback = function(v) if MX.KeyList then MX.KeyList:SetVisible(v) end end })
 	gr.mob = gearMenu:AddToggle({ Title = "Mobile Button", Flag = "mobile_button", Style = "Switch", Callback = function(v) win:SetMobileButton(v) end })
 	gr.lock = gearMenu:AddToggle({ Title = "Lock UI", Description = "Stops windows and buttons from being moved", Flag = "ui_locked", Style = "Switch", Callback = function(v) MX:SetLocked(v) end })
 	Tap(gh, function()
-		gr.glass:Set(MX.Glass, true)
 		gr.wm:Set(MX.Watermark ~= nil and MX.Watermark.Visible or false, true)
 		gr.kl:Set(MX.KeyList ~= nil and MX.KeyList.Visible or false, true)
 		gr.mob:Set(win.MobileBtn ~= nil, true)
@@ -5369,11 +5356,10 @@ function MX:CreateWindow(o)
 	})
 
 	local sidebar = Box(main, { Position = UDim2.new(0, 0, 0, HH), Size = UDim2.new(0, win.TabWidth, 1, -HH), ClipsDescendants = true }, "Side")
-	GlassOn(sidebar, 0.3)
 	RoundBox(sidebar, "Side", 0.3, "left")
 	Box(sidebar, { Size = UDim2.new(0, 1, 1, 0), AnchorPoint = Vector2.new(1, 0), Position = UDim2.fromScale(1, 0), BackgroundTransparency = 0.5, ZIndex = 2 }, "Border")
 	win.Sidebar = sidebar
-	local profileH = o.Profile ~= false and 52 or 0
+	local profileH = o.Profile ~= false and 44 or 0
 	local sl = New("ScrollingFrame", { BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.new(1, 0, 1, -profileH), CanvasSize = UDim2.new(), AutomaticCanvasSize = AY, ScrollBarThickness = 0, ScrollingDirection = Enum.ScrollingDirection.Y }, sidebar)
 	List(sl, 2)
 	Pad(sl, 8, 6, 8, 6)
@@ -5381,9 +5367,8 @@ function MX:CreateWindow(o)
 	table.insert(win.Pages, sl)
 	if profileH > 0 then
 		local pf = Box(sidebar, { Size = UDim2.new(1, 0, 0, profileH), AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 0, 1, 0) }, "Panel")
-		GlassOn(pf, 0.4)
 		Box(pf, { Size = UDim2.new(1, -16, 0, 1), Position = UDim2.new(0, 8, 0, 0), BackgroundTransparency = 0.5 }, "Border")
-		local av = New("ImageLabel", { Size = UDim2.fromOffset(32, 32), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0, 28, 0.5, 0), BackgroundTransparency = 0, BorderSizePixel = 0, Image = "" }, pf)
+		local av = New("ImageLabel", { Size = UDim2.fromOffset(26, 26), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0, 24, 0.5, 0), BackgroundTransparency = 0, BorderSizePixel = 0, Image = "" }, pf)
 		Bind(av, { BackgroundColor3 = "Element" })
 		New("UICorner", { CornerRadius = UDim.new(1, 0) }, av)
 		task.spawn(function()
@@ -5393,7 +5378,7 @@ function MX:CreateWindow(o)
 				if win.Profile and win.Profile.avatar then win.Profile.avatar.Image = img end
 			end
 		end)
-		local nf = New("Frame", { BackgroundTransparency = 1, Position = UDim2.new(0, 52, 0, 0), Size = UDim2.new(1, -84, 1, 0) }, pf)
+		local nf = New("Frame", { BackgroundTransparency = 1, Position = UDim2.new(0, 44, 0, 0), Size = UDim2.new(1, -72, 1, 0) }, pf)
 		List(nf, 0, Enum.FillDirection.Vertical, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
 		Lbl(nf, { Text = LocalPlayer.DisplayName, Size = UDim2.new(1, 0, 0, 16), TextSize = 13, Font = FONT.Bold, TextTruncate = Enum.TextTruncate.AtEnd, LayoutOrder = 1 })
 		Lbl(nf, { Text = "@" .. LocalPlayer.Name, Size = UDim2.new(1, 0, 0, 14), TextSize = 11, Font = FONT.Reg, TextTruncate = Enum.TextTruncate.AtEnd, LayoutOrder = 2 }, "Sub")
@@ -5407,13 +5392,12 @@ function MX:CreateWindow(o)
 	end
 
 	local content = Box(main, { Position = UDim2.new(0, win.TabWidth, 0, HH), Size = UDim2.new(1, -win.TabWidth, 1, -HH), ClipsDescendants = true }, "Panel")
-	GlassOn(content, 0.25)
 	RoundBox(content, "Panel", 0.25, "right")
 	win.Content = content
 	local fx = New("Frame", { Name = "FX", BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.fromScale(1, 1), ClipsDescendants = true, ZIndex = 3, Visible = false }, content)
 	New("UICorner", { CornerRadius = UDim.new(0, 10) }, fx)
 	win.FX = fx
-	win.FXScale = 1
+	win.FXScale = 1.8
 	win.PageHost = New("Frame", { BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ClipsDescendants = true }, content)
 
 	if o.Resizable ~= false then
@@ -5561,21 +5545,18 @@ function MX:CreateWatermark(o)
 	o = o or {}
 	if MX.Watermark then MX.Watermark:Destroy() end
 	local wm = { Visible = o.Visible ~= false, Items = {} }
-	local frame = Box(FloatLayer, { Size = UDim2.new(0, 0, 0, Touch and 34 or 36), AutomaticSize = AX, Visible = wm.Visible, ClipsDescendants = true }, "Card", 9, "Border")
-	GlassOn(frame, 0.2)
+	local frame = Box(FloatLayer, { Size = UDim2.new(0, 0, 0, 30), AutomaticSize = AX, Visible = wm.Visible }, "Card", 8, "Border")
 	Scaled(frame)
 	Place(frame, o.Position or "TopRight", o.Margin or 10)
-	Pad(frame, 0, 14, 0, 9)
+	Pad(frame, 0, 12, 0, 8)
 	List(frame, 10, Enum.FillDirection.Horizontal, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center)
-	local accent = New("Frame", { AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 0, 1, 0), Size = UDim2.new(1, 0, 0, 2), BorderSizePixel = 0, ZIndex = 5 }, frame)
-	Bind(accent, { BackgroundColor3 = "Accent" })
-	New("UIGradient", { Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.1), NumberSequenceKeypoint.new(1, 1) }) }, accent)
-	local logo = MXLogo(frame, 22)
+	local logo = MXLogo(frame, 18)
 	logo.LayoutOrder = 0
 	local titleLbl
 	if o.Title ~= false then
-		titleLbl = Lbl(frame, { Text = tostring(o.Title or "MX HUB"), Size = UDim2.new(0, 0, 1, 0), AutomaticSize = AX, Font = FONT.Bold, TextSize = 15, LayoutOrder = 1 })
+		titleLbl = Lbl(frame, { Text = tostring(o.Title or "MX HUB"), Size = UDim2.new(0, 0, 1, 0), AutomaticSize = AX, Font = FONT.Bold, TextSize = 14, LayoutOrder = 1 })
 	end
+	MX._KeepOn(frame)
 	Drag(frame, {
 		Begin = function()
 			if MX.Locked then return false end
@@ -5601,8 +5582,8 @@ function MX:CreateWatermark(o)
 		end
 		local item = { Name = name, Value = value, Key = key }
 		local order = 20 + #self.Items * 2
-		local sep = Box(frame, { Size = UDim2.fromOffset(1, 16), LayoutOrder = order - 1 }, "Border")
-		local l = Lbl(frame, { Size = UDim2.new(0, 0, 1, 0), AutomaticSize = AX, TextSize = 13, RichText = true, LayoutOrder = order }, "Text")
+		local sep = Box(frame, { Size = UDim2.fromOffset(1, 14), LayoutOrder = order - 1 }, "Border")
+		local l = Lbl(frame, { Size = UDim2.new(0, 0, 1, 0), AutomaticSize = AX, TextSize = 12, RichText = true, LayoutOrder = order }, "Text")
 		item.Label = l
 		item.Sep = sep
 		function item:Update()
@@ -5673,8 +5654,8 @@ function MX:CreateKeybindList(o)
 	if MX.KeyList then MX.KeyList:Destroy() end
 	local kl = { Visible = o.Visible == true, OnlyActive = o.OnlyActive or false, Key = o.Key or Enum.KeyCode.K }
 	local frame = Box(FloatLayer, { Size = UDim2.new(0, 170, 0, 0), AutomaticSize = AY, Visible = false }, "Card", 7, "Border")
-	GlassOn(frame, 0.2)
 	Scaled(frame)
+	MX._KeepOn(frame)
 	local pos = o.Position or "Left"
 	if pos == "Left" then
 		frame.AnchorPoint = Vector2.new(0, 0.5)
@@ -6009,6 +5990,7 @@ function Window:AddSettingsTab(o)
 	theme:AddDropdown({ Title = "Preset", Description = "Colors of the whole UI", Flag = "theme", Values = MX.ThemeOrder, Default = MX.ThemeName, Callback = function(n) MX:SetTheme(n) end })
 	theme:AddColorPicker({ Title = "Accent", Flag = "accent", Default = MX.Theme.Accent, NoRainbow = true, Callback = function(c) MX:SetAccent(c) end })
 	local nameT = theme:AddTextbox({ Title = "Theme Name", Placeholder = "theme name", Flag = "_theme_name" })
+	theme:AddDropdown({ Title = "Effect", Description = "Animation over the menu", Flag = "effect", Values = MX.EffectList, Default = self:GetEffect(), Callback = function(n) self:SetEffect(n) end })
 	local custom
 	theme:AddButton({ Title = "Create Theme", Callback = function()
 		local n = MX:CreateTheme(nameT:Get())
@@ -6026,9 +6008,6 @@ function Window:AddSettingsTab(o)
 		if n then MX:DeleteTheme(n) end
 	end })
 	table.insert(MX.CustomListeners, function() custom:Refresh(MX:GetCustomThemes()) end)
-	local fx = tab:AddSection({ Title = "Effects", Icon = "wand-2", Side = "Left" })
-	fx:AddDropdown({ Title = "Effect", Description = "Animation over the menu", Flag = "effect", Values = MX.EffectList, Default = self:GetEffect(), Search = false, Callback = function(n) self:SetEffect(n) end })
-	fx:AddDropdown({ Title = "Intensity", Description = "Low, Medium or High", Flag = "effect_intensity", Values = { "Low", "Medium", "High" }, Default = "Medium", Callback = function(v) self:SetEffectIntensity(v) end })
 	local cfg = tab:AddSection({ Title = "Configs", Icon = "folder", Side = "Right" })
 	cfg:AddConfigManager()
 	self._settingsTab = tab

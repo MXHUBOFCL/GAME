@@ -1,4 +1,4 @@
-local MX = loadstring(game:HttpGet("https://raw.githubusercontent.com/MXHUBOFCL/GAME/main/Source.lua"))()
+local MX = loadstring(game:HttpGet("https://raw.githubusercontent.com/YOUR_USER/YOUR_REPO/main/Source.lua"))()
 
 local C = Color3.fromRGB
 MX:AddThemes({

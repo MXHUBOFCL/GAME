@@ -17,13 +17,13 @@ local C3 = Color3.fromRGB
 local Notify = {
 	Version = "2.0.0",
 	Config = {
-		Width = Mobile and 252 or 296,
-		OffsetX = 12,
-		OffsetY = 8,
-		Spacing = 8,
+		Width = Mobile and 196 or 226,
+		OffsetX = 6,
+		OffsetY = 6,
+		Spacing = 5,
 		MaxVisible = 5,
 		Duration = 4,
-		Radius = 10,
+		Radius = 8,
 		HoverPause = true,
 	},
 	Theme = {
@@ -78,7 +78,7 @@ end
 local Gui = new("ScreenGui", {
 	Name = "MXNotify",
 	ResetOnSpawn = false,
-	IgnoreGuiInset = false,
+	IgnoreGuiInset = true,
 	DisplayOrder = 2147483000,
 	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 })
@@ -145,8 +145,8 @@ function Notify:Send(o)
 		Size = UDim2.new(1, -3, 0, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
 	}, card)
-	new("UIPadding", { PaddingTop = UDim.new(0, 11), PaddingBottom = UDim.new(0, 14), PaddingLeft = UDim.new(0, 12), PaddingRight = UDim.new(0, 10) }, inner)
-	new("UIListLayout", { Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder }, inner)
+	new("UIPadding", { PaddingTop = UDim.new(0, 7), PaddingBottom = UDim.new(0, 9), PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 6) }, inner)
+	new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }, inner)
 
 	local top = new("Frame", {
 		BackgroundTransparency = 1,
@@ -156,7 +156,7 @@ function Notify:Send(o)
 	}, inner)
 
 	local badge = new("Frame", {
-		Size = UDim2.fromOffset(30, 30),
+		Size = UDim2.fromOffset(22, 22),
 		BackgroundTransparency = 0.82,
 		BorderSizePixel = 0,
 	}, top)
@@ -168,7 +168,7 @@ function Notify:Send(o)
 			BackgroundTransparency = 1,
 			AnchorPoint = Vector2.new(0.5, 0.5),
 			Position = UDim2.fromScale(0.5, 0.5),
-			Size = UDim2.fromOffset(16, 16),
+			Size = UDim2.fromOffset(12, 12),
 			Image = tostring(o.Icon),
 			ImageColor3 = typeColor(kind),
 		}, badge)
@@ -177,7 +177,7 @@ function Notify:Send(o)
 			BackgroundTransparency = 1,
 			Size = UDim2.fromScale(1, 1),
 			Font = Enum.Font.BuilderSansBold,
-			TextSize = 17,
+			TextSize = 13,
 			Text = self.Glyphs[kind],
 			TextColor3 = typeColor(kind),
 		}, badge)
@@ -185,16 +185,16 @@ function Notify:Send(o)
 
 	local textCol = new("Frame", {
 		BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(40, 0),
-		Size = UDim2.new(1, -66, 0, 0),
+		Position = UDim2.fromOffset(29, 0),
+		Size = UDim2.new(1, -47, 0, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
 	}, top)
 	new("UIListLayout", { Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder }, textCol)
 	local title = new("TextLabel", {
 		BackgroundTransparency = 1,
-		Size = UDim2.new(1, 0, 0, 16),
+		Size = UDim2.new(1, 0, 0, 13),
 		Font = Enum.Font.BuilderSansBold,
-		TextSize = 14,
+		TextSize = 12,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextTruncate = Enum.TextTruncate.AtEnd,
 		Text = tostring(o.Title or kind),
@@ -206,7 +206,7 @@ function Notify:Send(o)
 		Size = UDim2.new(1, 0, 0, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
 		Font = Enum.Font.BuilderSans,
-		TextSize = 13,
+		TextSize = 11,
 		TextWrapped = true,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextYAlignment = Enum.TextYAlignment.Top,
@@ -220,7 +220,7 @@ function Notify:Send(o)
 		Size = UDim2.new(1, 0, 0, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
 		Font = Enum.Font.BuilderSans,
-		TextSize = 12,
+		TextSize = 10,
 		TextWrapped = true,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextYAlignment = Enum.TextYAlignment.Top,
@@ -233,11 +233,11 @@ function Notify:Send(o)
 	local close = new("TextButton", {
 		AnchorPoint = Vector2.new(1, 0),
 		Position = UDim2.new(1, 0, 0, 0),
-		Size = UDim2.fromOffset(22, 22),
+		Size = UDim2.fromOffset(18, 18),
 		BackgroundTransparency = 1,
 		AutoButtonColor = false,
 		Font = Enum.Font.BuilderSansBold,
-		TextSize = 16,
+		TextSize = 13,
 		Text = "x",
 		ZIndex = 4,
 	}, top)
@@ -276,7 +276,7 @@ function Notify:Send(o)
 	if o.Buttons and #o.Buttons > 0 then
 		local row = new("Frame", {
 			BackgroundTransparency = 1,
-			Size = UDim2.new(1, 0, 0, Touch and 32 or 28),
+			Size = UDim2.new(1, 0, 0, Touch and 26 or 22),
 			LayoutOrder = 2,
 		}, inner)
 		new("UIListLayout", { Padding = UDim.new(0, 6), FillDirection = Enum.FillDirection.Horizontal, SortOrder = Enum.SortOrder.LayoutOrder, HorizontalAlignment = Enum.HorizontalAlignment.Right }, row)
@@ -287,7 +287,7 @@ function Notify:Send(o)
 				AutoButtonColor = false,
 				BorderSizePixel = 0,
 				Font = Enum.Font.BuilderSansMedium,
-				TextSize = 13,
+				TextSize = 11,
 				Text = "  " .. tostring(b.Text or b.Title or "OK") .. "  ",
 				LayoutOrder = i,
 			}, row)
