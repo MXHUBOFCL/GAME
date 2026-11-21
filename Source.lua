@@ -30,6 +30,7 @@ local MX = {
 	Themes = {},
 	ThemeOrder = {},
 	ThemeName = "Mono",
+	Overrides = {},
 	ThemeSweep = false,
 	TextScale = 1,
 	LogoId = 105865788976884,
@@ -163,6 +164,7 @@ function MX:AddThemes(t)
 		if not MX.Themes[name] then table.insert(MX.ThemeOrder, name) end
 		MX.Themes[name] = d
 	end
+	if MX._PresetDrop then pcall(function() MX._PresetDrop:Refresh(MX.ThemeOrder) end) end
 end
 
 MX:AddThemes({
@@ -1922,12 +1924,18 @@ function MX:SetTheme(name, instant, keepOverride)
 	if not def then return end
 	def = MX._NormalizeTheme(def)
 	MX.Themes[name] = def
-	if not keepOverride then MX.AccentOverride = nil end
-	if MX.AccentOverride then
+	if not keepOverride then
+		MX.AccentOverride = nil
+		MX.Overrides = {}
+	end
+	if MX.AccentOverride or next(MX.Overrides) then
 		local c = {}
 		for k, v in pairs(def) do c[k] = v end
-		c.Accent = MX.AccentOverride
-		c.OnAccent = Lum(c.Accent) > 0.62 and C3(20, 20, 24) or C3(255, 255, 255)
+		if MX.AccentOverride then
+			c.Accent = MX.AccentOverride
+			c.OnAccent = Lum(c.Accent) > 0.62 and C3(20, 20, 24) or C3(255, 255, 255)
+		end
+		for k, v in pairs(MX.Overrides) do c[k] = v end
 		def = c
 	end
 	MX.ThemeName = name
@@ -1974,6 +1982,10 @@ function MX:SetTheme(name, instant, keepOverride)
 	end
 	if MX.Options.theme and MX.Options.theme.Value ~= name then MX.Options.theme:Set(name, true) end
 	if MX.Options.accent and not keepOverride then MX.Options.accent:Set(def.Accent, true) end
+	if not keepOverride then
+		if MX.Options.font_color then MX.Options.font_color:Set(def.Text, true) end
+		if MX.Options.muted_color then MX.Options.muted_color:Set(def.Sub, true) end
+	end
 	for i = #MX.ThemeListeners, 1, -1 do
 		local ok, alive = pcall(MX.ThemeListeners[i], name)
 		if ok and alive == false then table.remove(MX.ThemeListeners, i) end
@@ -2422,6 +2434,13 @@ end
 function MX:SetAccent(c)
 	MX.AccentOverride = c
 	MX:SetTheme(MX.ThemeName, true, true)
+end
+function MX:SetThemeColor(key, c)
+	MX.Overrides[key] = c
+	MX:SetTheme(MX.ThemeName, true, true)
+end
+function MX:ResetColors()
+	MX:SetTheme(MX.ThemeName, true)
 end
 MX:LoadCustomThemes()
 
@@ -3963,7 +3982,10 @@ function Container:AddKeybind(o)
 		Set = function(m)
 			bind.Mode = m
 			bind.Held = false
-			obj.State = false
+			if obj.State then
+				obj.State = false
+				if o.Callback and m ~= "Press" then task.spawn(o.Callback, false) end
+			end
 			MX:_KeyListRefresh()
 		end,
 	} or nil)
@@ -4067,6 +4089,69 @@ function Container:AddImage(o)
 	end
 	self:_Reg(o.Title, card)
 	return obj
+end
+
+function Container:AddGameCard(o)
+	o = o or {}
+	local card = Box(self.Content, { Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY, LayoutOrder = self:_Order() }, "Element", 8)
+	Pad(card, 10, 10, 10, 10)
+	List(card, 8)
+	local head = New("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 40), LayoutOrder = 1 }, card)
+	local icon = New("ImageLabel", { Size = UDim2.fromOffset(40, 40), BorderSizePixel = 0, Image = "rbxthumb://type=GameIcon&id=" .. game.GameId .. "&w=150&h=150" }, head)
+	Bind(icon, { BackgroundColor3 = "Card" })
+	New("UICorner", { CornerRadius = UDim.new(0, 8) }, icon)
+	local name = Lbl(head, { Text = tostring(o.Name or "Loading"), Position = UDim2.fromOffset(50, 2), Size = UDim2.new(1, -50, 0, 18), Font = FONT.Bold, TextSize = 14, TextTruncate = Enum.TextTruncate.AtEnd }, false)
+	name.TextColor3 = Theme.Text
+	Watch(name, function() name.TextColor3 = Theme.Text end)
+	local detail = Lbl(head, { Text = "", Position = UDim2.fromOffset(50, 22), Size = UDim2.new(1, -50, 0, 14), Font = FONT.Reg, TextSize = 11, TextTruncate = Enum.TextTruncate.AtEnd }, "Sub")
+	task.spawn(function()
+		local ok, info = pcall(function() return game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId) end)
+		if ok and type(info) == "table" and name.Parent then
+			if not o.Name and info.Name then name.Text = info.Name end
+			if type(info.Creator) == "table" and info.Creator.Name then detail.Text = "by " .. info.Creator.Name end
+		end
+	end)
+	local grid = New("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY, LayoutOrder = 2 }, card)
+	New("UIGridLayout", { CellPadding = UDim2.fromOffset(6, 6), CellSize = UDim2.new(0.25, -5, 0, 44), SortOrder = Enum.SortOrder.LayoutOrder }, grid)
+	local vals = {}
+	for i, key in ipairs({ "Players", "FPS", "Ping", "Session" }) do
+		local cell = Box(grid, { LayoutOrder = i }, "Card", 6, "Border")
+		vals[key] = Lbl(cell, { Text = "-", Position = UDim2.fromOffset(0, 5), Size = UDim2.new(1, 0, 0, 18), Font = FONT.Bold, TextSize = 14, TextXAlignment = Enum.TextXAlignment.Center })
+		Lbl(cell, { Text = key, Position = UDim2.fromOffset(0, 24), Size = UDim2.new(1, 0, 0, 14), Font = FONT.Reg, TextSize = 10, TextXAlignment = Enum.TextXAlignment.Center, Tr = true }, "Sub")
+	end
+	local acts = New("Frame", { BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY, LayoutOrder = 3 }, card)
+	New("UIGridLayout", { CellPadding = UDim2.fromOffset(6, 6), CellSize = UDim2.new(0.5, -3, 0, Touch and 34 or 30), SortOrder = Enum.SortOrder.LayoutOrder }, acts)
+	local function act(order, text, fn)
+		local b = Box(acts, { LayoutOrder = order }, "Card", 6, "Border")
+		Lbl(b, { Text = text, Size = UDim2.fromScale(1, 1), TextSize = 12, TextXAlignment = Enum.TextXAlignment.Center, Tr = true })
+		local h = Hit(b, 3)
+		Hover(h, b, "Card", "Hover")
+		Tap(h, fn)
+	end
+	act(1, "Rejoin", function()
+		pcall(function() game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer) end)
+	end)
+	act(2, "Copy Job ID", function()
+		MX.Utils.Copy(game.JobId)
+		MX:Success("Copied", game.JobId)
+	end)
+	local started, frames, stamp = os.clock(), 0, os.clock()
+	local hb
+	hb = RunService.Heartbeat:Connect(function()
+		if not card.Parent then hb:Disconnect() return end
+		frames += 1
+		local now = os.clock()
+		if now - stamp < 0.5 then return end
+		vals.FPS.Text = tostring(math.floor(frames / (now - stamp) + 0.5))
+		frames, stamp = 0, now
+		local ok, ping = pcall(function() return Stats.Network.ServerStatsItem["Data Ping"]:GetValue() end)
+		vals.Ping.Text = ok and (math.floor(ping + 0.5) .. "ms") or "-"
+		vals.Players.Text = #Players:GetPlayers() .. "/" .. Players.MaxPlayers
+		local t = math.floor(now - started)
+		vals.Session.Text = t >= 3600 and string.format("%d:%02d:%02d", t // 3600, t % 3600 // 60, t % 60) or string.format("%02d:%02d", t // 60, t % 60)
+	end)
+	self:_Reg("Game", card)
+	return { Card = card }
 end
 
 function Container:AddTabs(o)
@@ -4287,7 +4372,7 @@ function Container:AddConfigManager(o)
 	gbtn(r2, "Refresh", nil, function() refresh() end)
 
 	local autoT
-	autoT = self:AddToggle({ Title = "Auto Load Config", Description = "Loads the selected config on launch", Style = "Switch", Flag = "_cfg_auto", Default = MX:GetAutoLoad() ~= nil, Callback = function(v)
+	autoT = self:AddToggle({ Title = "Auto Load Config", Style = "Switch", Flag = "_cfg_auto", Default = MX:GetAutoLoad() ~= nil, Callback = function(v)
 		if v then
 			if not sel then
 				autoT:Set(false, true)
@@ -4300,7 +4385,7 @@ function Container:AddConfigManager(o)
 		end
 		updateStatus()
 	end })
-	self:AddToggle({ Title = "Auto Save", Description = "Saves the loaded config when something changes", Style = "Switch", Flag = "_cfg_autosave", Default = MX.AutoSave, Callback = function(v)
+	self:AddToggle({ Title = "Auto Save", Style = "Switch", Flag = "_cfg_autosave", Default = MX.AutoSave, Callback = function(v)
 		if v and not MX.LoadedConfig and sel then MX.LoadedConfig = sel end
 		MX:SetAutoSave(v)
 		updateStatus()
@@ -4608,6 +4693,7 @@ function Window:AddCategory(name)
 	table.insert(self.Cats, { l = l, line = line })
 	l.Visible = not self.Collapsed
 	line.Visible = self.Collapsed
+	return holder
 end
 
 function Tab:_Style()
@@ -5323,12 +5409,12 @@ function MX:CreateWindow(o)
 	local gearMenu, gearFrame = MakeMenu("Quick Settings", 240)
 	local gr = {}
 	gr.wm = gearMenu:AddToggle({ Title = "Watermark", Flag = "watermark", Style = "Switch", Default = true, Callback = function(v) if MX.Watermark then MX.Watermark:SetVisible(v) end end })
-	gr.kl = gearMenu:AddToggle({ Title = "Keybind List", Flag = "keybind_list", Style = "Switch", Callback = function(v) if MX.KeyList then MX.KeyList:SetVisible(v) end end })
+	if not Mobile then gr.kl = gearMenu:AddToggle({ Title = "Keybind List", Flag = "keybind_list", Style = "Switch", Callback = function(v) if MX.KeyList then MX.KeyList:SetVisible(v) end end }) end
 	gr.mob = gearMenu:AddToggle({ Title = "Mobile Button", Flag = "mobile_button", Style = "Switch", Callback = function(v) win:SetMobileButton(v) end })
 	gr.lock = gearMenu:AddToggle({ Title = "Lock UI", Description = "Stops windows and buttons from being moved", Flag = "ui_locked", Style = "Switch", Callback = function(v) MX:SetLocked(v) end })
 	Tap(gh, function()
 		gr.wm:Set(MX.Watermark ~= nil and MX.Watermark.Visible or false, true)
-		gr.kl:Set(MX.KeyList ~= nil and MX.KeyList.Visible or false, true)
+		if gr.kl then gr.kl:Set(MX.KeyList ~= nil and MX.KeyList.Visible or false, true) end
 		gr.mob:Set(win.MobileBtn ~= nil, true)
 		gr.lock:Set(MX.Locked, true)
 		ShowMenu(gearMenu, gearFrame, gb)
@@ -5438,8 +5524,31 @@ function MX:CreateWindow(o)
 		win:SetMobileButton(true, type(mbOpt) == "table" and mbOpt or nil)
 	end
 	win:_BuildProfile()
+	if o.Home ~= false then win:_BuildHome(type(o.Home) == "table" and o.Home or {}) end
+	if o.Settings ~= false then win:_BuildSettings(type(o.Settings) == "table" and o.Settings or {}) end
 	win:_ApplySide()
 	return win
+end
+
+function Window:_BuildHome(o)
+	self:AddCategory("Overview")
+	local tab = self:AddTab({ Title = o.Title or "Home", Icon = "home" })
+	tab:AddImage({ Height = o.ImageHeight or 110, Image = o.Image or MX.WelcomeImage, Callback = function()
+		if not MX.Discord then return end
+		MX.Utils.Copy(MX.Discord)
+		MX:Success("Copied", MX.Discord)
+	end })
+	tab:AddGameCard({ Name = o.GameName })
+	self.Home = tab
+	return tab
+end
+
+function Window:_BuildSettings(o)
+	local holder = self:AddCategory("Misc")
+	local tab = self:AddSettingsTab(o)
+	holder.LayoutOrder = 1000000
+	tab.Btn.LayoutOrder = 1000001
+	return tab
 end
 
 function Window:_UpdateMobileBtn()
@@ -5521,7 +5630,6 @@ function MX:Destroy()
 	if MX.AutoSave and MX.LoadedConfig then pcall(function() MX:SaveConfig(MX.LoadedConfig) end) end
 	MX.Dead = true
 	for _, c in ipairs(Conns) do pcall(function() c:Disconnect() end) end
-	if Blur then Blur:Destroy() Blur = nil end
 	if MX._nl then pcall(function() MX._nl:Destroy() end) end
 	if Gui then Gui:Destroy() end
 	if genv.MXUI == MX then genv.MXUI = nil end
@@ -5652,6 +5760,16 @@ end
 function MX:CreateKeybindList(o)
 	o = o or {}
 	if MX.KeyList then MX.KeyList:Destroy() end
+	if Mobile then
+		local inert = { Visible = false, Key = o.Key }
+		function inert:Refresh() end
+		function inert:SetKey() end
+		function inert:SetVisible() end
+		function inert:Toggle() end
+		function inert:Destroy() if MX.KeyList == self then MX.KeyList = nil end end
+		MX.KeyList = inert
+		return inert
+	end
 	local kl = { Visible = o.Visible == true, OnlyActive = o.OnlyActive or false, Key = o.Key or Enum.KeyCode.K }
 	local frame = Box(FloatLayer, { Size = UDim2.new(0, 170, 0, 0), AutomaticSize = AY, Visible = false }, "Card", 7, "Border")
 	Scaled(frame)
@@ -5987,10 +6105,25 @@ function Window:AddSettingsTab(o)
 	o = o or {}
 	local tab = self:AddTab({ Title = o.Title or "Settings", Icon = "settings" })
 	local theme = tab:AddSection({ Title = "Theme", Icon = "palette", Side = "Left" })
-	theme:AddDropdown({ Title = "Preset", Description = "Colors of the whole UI", Flag = "theme", Values = MX.ThemeOrder, Default = MX.ThemeName, Callback = function(n) MX:SetTheme(n) end })
-	theme:AddColorPicker({ Title = "Accent", Flag = "accent", Default = MX.Theme.Accent, NoRainbow = true, Callback = function(c) MX:SetAccent(c) end })
+	MX._PresetDrop = theme:AddDropdown({ Title = "Preset", Flag = "theme", Values = MX.ThemeOrder, Default = MX.ThemeName, Callback = function(n) MX:SetTheme(n) end })
+	local function live(fn)
+		local pending, busy
+		return function(c)
+			pending = c
+			if busy then return end
+			busy = true
+			task.delay(0.08, function()
+				busy = false
+				fn(pending)
+			end)
+		end
+	end
+	theme:AddColorPicker({ Title = "Accent", Flag = "accent", Default = MX.Theme.Accent, NoRainbow = true, Callback = live(function(c) MX:SetAccent(c) end) })
+	theme:AddColorPicker({ Title = "Font Color", Flag = "font_color", Default = MX.Theme.Text, NoRainbow = true, Callback = live(function(c) MX:SetThemeColor("Text", c) end) })
+	theme:AddColorPicker({ Title = "Muted Font", Flag = "muted_color", Default = MX.Theme.Sub, NoRainbow = true, Callback = live(function(c) MX:SetThemeColor("Sub", c) end) })
+	theme:AddButton({ Title = "Reset Colors", Callback = function() MX:ResetColors() end })
 	local nameT = theme:AddTextbox({ Title = "Theme Name", Placeholder = "theme name", Flag = "_theme_name" })
-	theme:AddDropdown({ Title = "Effect", Description = "Animation over the menu", Flag = "effect", Values = MX.EffectList, Default = self:GetEffect(), Callback = function(n) self:SetEffect(n) end })
+	theme:AddDropdown({ Title = "Effect", Flag = "effect", Values = MX.EffectList, Default = self:GetEffect(), Callback = function(n) self:SetEffect(n) end })
 	local custom
 	theme:AddButton({ Title = "Create Theme", Callback = function()
 		local n = MX:CreateTheme(nameT:Get())
@@ -6003,7 +6136,7 @@ function Window:AddSettingsTab(o)
 		end
 	end })
 	custom = theme:AddDropdown({ Title = "Custom Themes", Values = MX:GetCustomThemes(), Placeholder = "no themes", Flag = "_theme_custom", Callback = function(n) MX:SetTheme(n) end })
-	theme:AddButton({ Title = "Delete Theme", Description = "Hold to delete", Hold = 1, Callback = function()
+	theme:AddButton({ Title = "Delete Theme", Hold = 1, Callback = function()
 		local n = custom:Get()
 		if n then MX:DeleteTheme(n) end
 	end })

@@ -1,4 +1,4 @@
-local MX = loadstring(game:HttpGet("https://raw.githubusercontent.com/MXHUBOFCL/GAME/main/Source.lua"))()
+local MX = loadstring(game:HttpGet("https://raw.githubusercontent.com/YOUR_USER/YOUR_REPO/main/Source.lua"))()
 
 local C = Color3.fromRGB
 MX:AddThemes({
@@ -10,7 +10,7 @@ MX.Discord = "https://discord.gg/G7FCTC2mEk"
 MX.NotifyURL = "https://raw.githubusercontent.com/MXHUBOFCL/GAME/main/Notify.lua"
 
 MX:AddTranslations("Indonesia", {
-	["Welcome"] = "Selamat Datang", ["Labels and Progress"] = "Label dan Progres", ["Notifications"] = "Notifikasi",
+	["Labels and Progress"] = "Label dan Progres", ["Notifications"] = "Notifikasi",
 	["Run Progress"] = "Jalankan Progres", ["Elements"] = "Elemen", ["Locked Toggle"] = "Toggle Terkunci",
 })
 
@@ -33,21 +33,12 @@ Watermark:AddTime()
 
 local KeyList = MX:CreateKeybindList({ Key = Enum.KeyCode.K, Visible = false })
 
-Window:AddCategory("Overview")
-local Home = Window:AddTab("Home", "home")
 local Elements = Window:AddTab({ Title = "Elements", Icon = "sliders-horizontal", Badge = "NEW" })
-Window:AddCategory("Misc")
 
-Home:AddImage({ Height = 110, Image = MX.WelcomeImage, Callback = function()
-	MX.Utils.Copy(MX.Discord)
-	MX:Success("Copied", MX.Discord)
-end })
-Home:AddParagraph({ Title = "Welcome", Content = "MX UI works with mouse and touch. Use the lock button in the header to stop the UI from being moved. On phones a round MX button opens and closes the menu, and you can drag it anywhere. On PC use INSERT or RIGHT SHIFT." })
-
-local Info = Home:AddSection({ Title = "Labels and Progress", Icon = "activity" })
+local Info = Elements:AddSection({ Title = "Labels and Progress", Icon = "activity" })
 local Status = Info:AddLabel("Status: Idle")
 local Bar = Info:AddProgress({ Title = "Progress", Default = 20 })
-Info:AddButton({ Title = "Run Progress", Description = "Shows a spinner while it runs", Callback = function()
+Info:AddButton({ Title = "Run Progress", Callback = function()
 	for i = 0, 100, 5 do
 		Bar:Set(i)
 		Status:Set("Status: " .. i .. "%")
@@ -56,7 +47,7 @@ Info:AddButton({ Title = "Run Progress", Description = "Shows a spinner while it
 	MX:Success("Done", "Progress finished.")
 end })
 
-local Notes = Home:AddSection({ Title = "Notifications", Icon = "bell", Collapsible = true })
+local Notes = Elements:AddSection({ Title = "Notifications", Icon = "bell", Collapsible = true })
 Notes:AddButton({ Title = "Info", Callback = function() MX:Info("Info", "An info notification.") end })
 Notes:AddButton({ Title = "Success", Callback = function() MX:Success("Saved", "Your settings were saved.") end })
 Notes:AddButton({ Title = "Warning", Callback = function() MX:Warning("Careful", "Connection looks unstable.") end })
@@ -69,22 +60,22 @@ Notes:AddButton({ Title = "With Buttons", Callback = function()
 end })
 
 local Basic = Elements:AddSection({ Title = "Toggles", Icon = "toggle-right" })
-Basic:AddCheckbox({ Title = "Checkbox", Description = "Square box, filled when on", Flag = "basic_check", Default = true, Callback = function(v) demo("Checkbox", tostring(v)) end })
-Basic:AddSwitch({ Title = "Switch", Description = "Sliding switch", Flag = "basic_switch", Callback = function(v) demo("Switch", tostring(v)) end })
+Basic:AddCheckbox({ Title = "Checkbox", Flag = "basic_check", Default = true, Callback = function(v) demo("Checkbox", tostring(v)) end })
+Basic:AddSwitch({ Title = "Switch", Flag = "basic_switch", Callback = function(v) demo("Switch", tostring(v)) end })
 
 local Extras = Elements:AddSection({ Title = "Toggle Extras", Icon = "settings" })
-Extras:AddToggle({ Title = "Boxes", Description = "Color swatch and a gear with options", Flag = "boxes", Options = {
+Extras:AddToggle({ Title = "Boxes", Flag = "boxes", Options = {
 	{ Type = "ColorPicker", Title = "Color", Flag = "boxes_color", Default = C(255, 120, 170) },
 	{ Type = "Toggle", Title = "Filled", Flag = "boxes_fill", Style = "Switch" },
 	{ Type = "Slider", Title = "Thickness", Flag = "boxes_thick", Min = 1, Max = 5, Default = 1 },
 	{ Type = "Dropdown", Title = "Style", Flag = "boxes_style", Values = { "2D", "3D", "Corner" }, Default = "2D" },
 } })
-Extras:AddToggle({ Title = "Chams", Description = "Keybind, color and options together", Flag = "chams", Keybind = Enum.KeyCode.C, KeyMode = "Toggle", Color = { Flag = "chams_color", Default = C(96, 205, 255) }, Options = function(menu)
+Extras:AddToggle({ Title = "Chams", Flag = "chams", Keybind = Enum.KeyCode.C, KeyMode = "Toggle", Color = { Flag = "chams_color", Default = C(96, 205, 255) }, Options = function(menu)
 	menu:AddSlider({ Title = "Transparency", Flag = "chams_trans", Min = 0, Max = 100, Default = 40, Suffix = "%" })
 	menu:AddDropdown({ Title = "Targets", Flag = "chams_targets", Multi = true, Values = { "Players", "NPCs", "Items" }, Default = { "Players" } })
 end })
-Extras:AddToggle({ Title = "Fly", Description = "Toggle mode, press X. Tap it in the keybind list on mobile", Flag = "fly", Keybind = Enum.KeyCode.X, KeyMode = "Toggle", Style = "Switch" })
-Extras:AddToggle({ Title = "Sprint", Description = "Hold mode", Flag = "sprint", Keybind = Enum.KeyCode.LeftShift, KeyMode = "Hold", Style = "Switch" })
+Extras:AddToggle({ Title = "Fly", Flag = "fly", Keybind = Enum.KeyCode.X, KeyMode = "Toggle", Style = "Switch" })
+Extras:AddToggle({ Title = "Sprint", Flag = "sprint", Keybind = Enum.KeyCode.LeftShift, KeyMode = "Hold", Style = "Switch" })
 
 local Sl = Elements:AddSection({ Title = "Sliders and Inputs", Icon = "sliders-horizontal" })
 Sl:AddSlider({ Title = "Basic Slider", Flag = "sl1", Min = 0, Max = 100, Default = 50 })
@@ -93,14 +84,14 @@ Sl:AddNumberInput({ Title = "Amount", Flag = "amount", Min = 0, Max = 500, Defau
 Sl:AddTextbox({ Title = "Textbox", Flag = "text", Placeholder = "Type something", Callback = function(t, enter) if enter then demo("Textbox", t) end end })
 
 local Dr = Elements:AddSection({ Title = "Dropdown, Color, Key", Icon = "list" })
-Dr:AddDropdown({ Title = "Dropdown", Description = "One element. Multi = true allows many picks, search is always on", Flag = "drop", Multi = true, Values = { "Players", "NPCs", "Items", "Chests", "Bosses", "Pets", "Vehicles", "Portals" }, Default = { "Players" } })
+Dr:AddDropdown({ Title = "Dropdown", Flag = "drop", Multi = true, Values = { "Players", "NPCs", "Items", "Chests", "Bosses", "Pets", "Vehicles", "Portals" }, Default = { "Players" } })
 Dr:AddColorPicker({ Title = "Color Picker", Flag = "color", Default = C(255, 120, 170), DefaultAlpha = 1 })
 Dr:AddKeybind({ Title = "Teleport", Flag = "tp", Default = Enum.KeyCode.V, Mode = "Press", Callback = function() demo("Teleport", "Key pressed") end })
 
 local States = Elements:AddSection({ Title = "Hold, Locked, Loading", Icon = "lock" })
 States:AddButton({ Title = "Hold To Reset", Hold = 1.5, Callback = function() MX:Success("Confirmed", "Reset.") end })
 States:AddToggle({ Title = "Locked Toggle", Locked = true, LockedReason = "Premium only" })
-States:AddButton({ Title = "Failing Callback", Description = "Flashes red", Callback = function() error("Something went wrong") end })
+States:AddButton({ Title = "Failing Callback", Callback = function() error("Something went wrong") end })
 States:AddButton({ Title = "Dialog", Callback = function()
 	Window:Dialog({ Title = "Are You Sure?", Content = "Only an example dialog.", Buttons = { { Title = "Confirm", Primary = true, Callback = function() MX:Success("Confirmed", "OK") end }, { Title = "Cancel" } } })
 end })
@@ -115,6 +106,5 @@ local Inner = Tabs:AddTabs({ "First", "Second" })
 Inner.Pages.First:AddToggle({ Title = "Toggle On First", Flag = "inner_t" })
 Inner.Pages.Second:AddButton({ Title = "Back To First", Callback = function() Inner:Select("First") end })
 
-Window:AddSettingsTab()
 MX:LoadAutoConfig()
 MX:Info("MX HUB", "Loaded. Tap the MX button or press INSERT.")
